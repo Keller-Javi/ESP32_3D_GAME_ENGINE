@@ -4,7 +4,8 @@ int fov = 90;
 Point light = {15.0, -1.5, -3};
 
 static LGFX lcd;
-static LGFX_Sprite canvas(&lcd);
+LGFX_Sprite canvas[2] = { LGFX_Sprite(&lcd), LGFX_Sprite(&lcd) };
+uint8_t bufferIdx = 0;
 
 Point rotated[MAX_VERTICES];
 RenderTriangle renderList[MAX_TRIANGLES];
@@ -22,38 +23,43 @@ void setScreen(int init_screen_time)
 {
   lcd.init();
 
-  lcd.setColorDepth(COLOR_DEPTH);
-  canvas.createSprite(HEIGHT, WIDTH);
+  for (int i = 0; i < 2; i++) {
+    canvas[i].setPsram(true); // <--- Obliga a LovyanGFX a alojarlo en PSRAM
+    canvas[i].createSprite(HEIGHT, WIDTH);; 
+  }
 
-  initScreen();
+  lcd.setColorDepth(COLOR_DEPTH);
+
+  initScreen(&canvas[0]);
   delay(init_screen_time);
 }
 
-void initScreen()
+void initScreen(LGFX_Sprite* canvas)
 {
-  canvas.fillScreen(0x0000);
+  canvas->fillScreen(0x0000);
 
-  canvas.setTextColor(0xFFFF);
-  canvas.setTextSize(2);
-  canvas.setCursor(50,CENTER_Y);
-  canvas.println("HELLO WORLD!");
-  canvas.setTextColor(TFT_RED);
-  canvas.setCursor(30,CENTER_Y+20);
-  canvas.println("...............");
+  canvas->setTextColor(0xFFFF);
+  canvas->setTextSize(2);
+  canvas->setCursor(50, CENTER_Y);
+  canvas->println("HELLO WORLD!");
+  canvas->setTextColor(TFT_RED);
+  canvas->setCursor(30, CENTER_Y + 20);
+  canvas->println("...............");
 
-  canvas.pushSprite(0,0);
+  canvas->pushSprite(0, 0);
 }
 
-void FPSScreen()
+void FPSScreen(LGFX_Sprite* canvas)
 {
-  canvas.setTextColor(0xFFFF);
-  canvas.setTextSize(2);
-  canvas.setCursor(0,0);
-  canvas.print("FPS: ");
-  canvas.println(fps);
-  canvas.setCursor(0,HEIGHT-20);
-  canvas.print("Triangles: ");
-  canvas.println(visibleTriangles/fps);
+  canvas->setTextColor(0xFFFF);
+  canvas->setTextSize(2);
+  canvas->setCursor(0, 0);
+  canvas->print("FPS: ");
+  canvas->println(fps);
+
+  canvas->setCursor(0, HEIGHT-60);
+  canvas->print("Triangles: ");
+  canvas->println(visibleTriangles / fps);
 }
 
 void setDirectionLight(Point lgt)
@@ -167,19 +173,21 @@ void renderWorld(Scene &scene)
   quickSort(0, trianglesCount - 1);
 
   uint32_t t2 = millis();
-  canvas.fillSprite(BACKGROUND); // Set backgraund color
+  canvas[bufferIdx].fillSprite(BACKGROUND); // Set backgraund color
 
   for(int i = 0; i < trianglesCount; i++){
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
-                          *renderList[i].texture, renderList[i].light_intensity);
+                          *renderList[i].texture, renderList[i].light_intensity, &canvas[bufferIdx]);
   }
 
-  FPSScreen();
+  FPSScreen(&canvas[bufferIdx]);
 
   uint32_t t3 = millis();
 
-  canvas.pushSprite(0,0);
+  canvas[bufferIdx].pushSprite(0,0);
+
+  bufferIdx = 1 - bufferIdx;
 
   uint32_t t4 = millis();
 
@@ -194,7 +202,7 @@ void renderWorld(Scene &scene)
   );
 }
 
-void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity)
+void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, LGFX_Sprite *canvas)
 {
   // 1. Ordenar los vértices por Y
   if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }
@@ -286,7 +294,7 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
         uint16_t lit_color = (r << 11) | (g << 5) | b;
 
         // Pintar en el lienzo virtual
-        canvas.drawPixel(x, y, lit_color);
+        canvas->drawPixel(x, y, lit_color);
 
         // Avanzar al siguiente píxel de la textura
         u += du;
