@@ -78,10 +78,20 @@ struct RenderTriangle
     uint16_t light_intensity;
 };
 
+struct Camera
+{
+  Point position;
+  Point rotation;
+
+  float fov;
+};
+
 struct Scene
 {
   Mesh* objects[MAX_OBJECTS];
   int numObjects;
+
+  Camera* camera;
 };
 
 #endif

@@ -16,7 +16,4 @@
 #define MAX_TRIANGLES     600
 #define MAX_OBJECTS       5
 
-// Configuración modificable
-extern int fov;
-
 #endif

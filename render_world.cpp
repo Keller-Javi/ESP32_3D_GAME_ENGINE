@@ -1,12 +1,14 @@
 #include "render_world.h"
 
-int fov = 90;
+// LIGHT 
 Point light = {15.0, -1.5, -3};
 
+// BUFFERING 
 static LGFX lcd;
 LGFX_Sprite canvas[2] = { LGFX_Sprite(&lcd), LGFX_Sprite(&lcd) };
 uint8_t bufferIdx = 0;
 
+// TRANSFORM - PROYECT
 Point rotated[MAX_VERTICES];
 RenderTriangle renderList[MAX_TRIANGLES];
 
@@ -22,10 +24,11 @@ int trianglesCountPerSec = 0;
 void setScreen(int init_screen_time)
 {
   lcd.init();
+  lcd.setRotation(1);
 
   for (int i = 0; i < 2; i++) {
     canvas[i].setPsram(true); // <--- Obliga a LovyanGFX a alojarlo en PSRAM
-    canvas[i].createSprite(HEIGHT, WIDTH);; 
+    canvas[i].createSprite(HEIGHT, WIDTH);
   }
 
   lcd.setColorDepth(COLOR_DEPTH);
@@ -40,10 +43,10 @@ void initScreen(LGFX_Sprite* canvas)
 
   canvas->setTextColor(0xFFFF);
   canvas->setTextSize(2);
-  canvas->setCursor(50, CENTER_Y);
+  canvas->setCursor(70, CENTER_X);
   canvas->println("HELLO WORLD!");
   canvas->setTextColor(TFT_RED);
-  canvas->setCursor(30, CENTER_Y + 20);
+  canvas->setCursor(50, CENTER_X + 20);
   canvas->println("...............");
 
   canvas->pushSprite(0, 0);
@@ -57,7 +60,7 @@ void FPSScreen(LGFX_Sprite* canvas)
   canvas->print("FPS: ");
   canvas->println(fps);
 
-  canvas->setCursor(0, HEIGHT-60);
+  canvas->setCursor(0, (WIDTH-20));
   canvas->print("Triangles: ");
   canvas->println(visibleTriangles / fps);
 }
@@ -71,7 +74,7 @@ void setDirectionLight(Point lgt)
   light.z /= len;
 }
 
-void prepareObject(Mesh& instance)
+void prepareObject(Mesh& instance, Camera& camera)
 {
   // Rotaciones del objeto 3D
   float sin_x = sin(instance.rotation.x);
@@ -79,6 +82,13 @@ void prepareObject(Mesh& instance)
 
   float sin_y = sin(instance.rotation.y);
   float cos_y = cos(instance.rotation.y);
+
+  // Rotaciones de la camara
+  float sin_cam_y = sin(-camera.rotation.y);
+  float cos_cam_y = cos(-camera.rotation.y);
+
+  float sin_cam_x = sin(-camera.rotation.x);
+  float cos_cam_x = cos(-camera.rotation.x);
 
   for (int i = 0; i < instance.numVertices; i++) {
     float x = instance.vertices[i].x;
@@ -101,6 +111,24 @@ void prepareObject(Mesh& instance)
     yr += instance.position.y;
     zr += instance.position.z;
 
+    // Para la posición de la camara
+    xr -= camera.position.x;
+    yr -= camera.position.y;
+    zr -= camera.position.z;
+
+    // Rotación del objeto respecto a la camara
+    float tx = xr * cos_cam_y - zr * sin_cam_y;
+    float tz = xr * sin_cam_y + zr * cos_cam_y;
+
+    xr = tx;
+    zr = tz;
+
+    float ty = yr * cos_cam_x - zr * sin_cam_x;
+    tz = yr * sin_cam_x + zr * cos_cam_x;
+
+    yr = ty;
+    zr = tz;
+
     rotated[i].x = xr;
     rotated[i].y = yr;
     rotated[i].z = zr;
@@ -113,10 +141,10 @@ void prepareObject(Mesh& instance)
 
     Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
 
-    if (faceVisible(instance.faces[i].a, vec_norm)){
-      Point2D p1 = {(rotated[instance.faces[i].a].x * fov) / rotated[instance.faces[i].a].z + CENTER_X, (rotated[instance.faces[i].a].y  * fov) / rotated[instance.faces[i].a].z + CENTER_Y};
-      Point2D p2 = {(rotated[instance.faces[i].b].x * fov) / rotated[instance.faces[i].b].z + CENTER_X, (rotated[instance.faces[i].b].y  * fov) / rotated[instance.faces[i].b].z + CENTER_Y};
-      Point2D p3 = {(rotated[instance.faces[i].c].x * fov) / rotated[instance.faces[i].c].z + CENTER_X, (rotated[instance.faces[i].c].y  * fov) / rotated[instance.faces[i].c].z + CENTER_Y};
+    if (faceVisible(instance.faces[i].a, vec_norm, camera)){
+      Point2D p1 = {(rotated[instance.faces[i].a].x * camera.fov) / rotated[instance.faces[i].a].z + CENTER_X, (rotated[instance.faces[i].a].y  * camera.fov) / rotated[instance.faces[i].a].z + CENTER_Y};
+      Point2D p2 = {(rotated[instance.faces[i].b].x * camera.fov) / rotated[instance.faces[i].b].z + CENTER_X, (rotated[instance.faces[i].b].y  * camera.fov) / rotated[instance.faces[i].b].z + CENTER_Y};
+      Point2D p3 = {(rotated[instance.faces[i].c].x * camera.fov) / rotated[instance.faces[i].c].z + CENTER_X, (rotated[instance.faces[i].c].y  * camera.fov) / rotated[instance.faces[i].c].z + CENTER_Y};
       
       int area = (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y);
 
@@ -144,7 +172,7 @@ void prepareObject(Mesh& instance)
   }
 }
 
-void renderWorld(Scene &scene)
+void renderWorld(Scene& scene)
 {
   // Benchmark
   frameCount++;
@@ -165,7 +193,7 @@ void renderWorld(Scene &scene)
   uint32_t t0 = millis();
 
   for (int i = 0; i < scene.numObjects; i++){
-    prepareObject(*scene.objects[i]);
+    prepareObject(*scene.objects[i], *scene.camera);
   }
 
   uint32_t t1 = millis();
@@ -371,14 +399,13 @@ Point normalVector(int a, int b, int c)
     return {nx, ny, nz};
 }
 
-bool faceVisible(int a, Point norm_vec)
+bool faceVisible(int a, Point norm_vec, Camera& camera)
 {
     Point A = rotated[a];
 
-    // Cámara en (0,0,0)
-    float vx = -A.x;
-    float vy = -A.y;
-    float vz = -A.z;
+    float vx = camera.position.x - A.x;
+    float vy = camera.position.y - A.y;
+    float vz = camera.position.z - A.z;
 
     // Producto escalar
     float dot = norm_vec.x*vx + norm_vec.y*vy + norm_vec.z*vz;

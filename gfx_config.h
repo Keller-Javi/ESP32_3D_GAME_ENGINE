@@ -44,6 +44,8 @@ public:
             cfg.pin_rst = 6;
             cfg.pin_busy = -1;
 
+            // cfg.panel_width  = WIDTH;
+            // cfg.panel_height = HEIGHT;
             cfg.panel_width  = WIDTH;
             cfg.panel_height = HEIGHT;
 
