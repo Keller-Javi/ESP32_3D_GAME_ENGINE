@@ -61,10 +61,9 @@ void loop() {
   }
 
   car.position.z += velocity_translate;
-  
-  float angle = -atan2(car.position.x - camera.position.x, car.position.z - camera.position.z);
 
-  camera.rotation.y = angle; 
+  //camera.lookAt(car.position);
+  camera.follow(car, 300, 150, 150);
 
   renderWorld(world);
 }

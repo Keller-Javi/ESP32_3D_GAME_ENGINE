@@ -403,9 +403,9 @@ bool faceVisible(int a, Point norm_vec, Camera& camera)
 {
     Point A = rotated[a];
 
-    float vx = camera.position.x - A.x;
-    float vy = camera.position.y - A.y;
-    float vz = camera.position.z - A.z;
+    float vx = - A.x;
+    float vy = - A.y;
+    float vz = - A.z;
 
     // Producto escalar
     float dot = norm_vec.x*vx + norm_vec.y*vy + norm_vec.z*vz;

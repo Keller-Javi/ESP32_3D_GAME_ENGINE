@@ -2,8 +2,9 @@
 #define RENDER_WORLD
 
 #include <SPI.h>
+#include "scene.h"
+#include "engine_config.h"
 #include "gfx_config.h"
-#include "engine_types.h"
 
 void setScreen(int init_screen_time);
 void initScreen(LGFX_Sprite *canvas);
