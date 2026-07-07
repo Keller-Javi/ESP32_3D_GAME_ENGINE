@@ -11,6 +11,7 @@ uint8_t bufferIdx = 0;
 // TRANSFORM - PROYECT
 Point rotated[MAX_VERTICES];
 RenderTriangle renderList[MAX_TRIANGLES];
+float near = 1.0f;
 
 int trianglesCount = 0;
 
@@ -20,6 +21,10 @@ unsigned long frameCount = 0;
 int fps = 0;
 int visibleTriangles = 0;
 int trianglesCountPerSec = 0;
+
+int descartadosZ = 0;
+int descartadosBackface = 0;
+int descartadosArea = 0;
 
 void setScreen(int init_screen_time)
 {
@@ -136,40 +141,167 @@ void prepareObject(Mesh& instance, Camera& camera)
 
   // Proyección y dibujo en pantalla
   for (int i = 0; i < instance.numFaces; i++) {
+
+    if (trianglesCount >= MAX_TRIANGLES){
+      Serial.println("OVERFLOW");
+      break;
+    }
+
     // Primero verifico si el triangulo no está fuera de la pantalla. ESTO GENERA ERRORES VISUALES A VECES
-    if(rotated[instance.faces[i].a].z < 1 || rotated[instance.faces[i].b].z < 1 || rotated[instance.faces[i].c].z < 1) continue;
+    // El z < 1 ya es en base a la camara, por lo que si se sale de la camara no dibuja ese triangulo.
+    int cont = 0;
+    
+    Vertex v1;
+    Vertex v2;
+    Vertex v3;
 
-    Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
+    v1.position = rotated[instance.faces[i].a];
+    v2.position = rotated[instance.faces[i].b];
+    v3.position = rotated[instance.faces[i].c];
 
-    if (faceVisible(instance.faces[i].a, vec_norm, camera)){
-      Point2D p1 = {(rotated[instance.faces[i].a].x * camera.fov) / rotated[instance.faces[i].a].z + CENTER_X, (rotated[instance.faces[i].a].y  * camera.fov) / rotated[instance.faces[i].a].z + CENTER_Y};
-      Point2D p2 = {(rotated[instance.faces[i].b].x * camera.fov) / rotated[instance.faces[i].b].z + CENTER_X, (rotated[instance.faces[i].b].y  * camera.fov) / rotated[instance.faces[i].b].z + CENTER_Y};
-      Point2D p3 = {(rotated[instance.faces[i].c].x * camera.fov) / rotated[instance.faces[i].c].z + CENTER_X, (rotated[instance.faces[i].c].y  * camera.fov) / rotated[instance.faces[i].c].z + CENTER_Y};
+    v1.uv = instance.texcoords[instance.faces_texcoords[i].a];
+    v2.uv = instance.texcoords[instance.faces_texcoords[i].b];
+    v3.uv = instance.texcoords[instance.faces_texcoords[i].c];
+
+    if(v1.position.z < 1) cont++;
+    if(v2.position.z < 1) cont++;
+    if(v3.position.z < 1) cont++;
+
+    if(cont == 3) {descartadosZ++; continue;} // los tres vertices fuera de la camara
+    else if(cont == 1) { // Un solo vertice fuera de la camara
+      // Primero ordenamos A < B < C
+      /*   A
+          /|
+         / |
+        /  |
+       B   |
+       \   |
+      --P--Q--- Near Plane --> Z = 1
+         \ |
+           C
+      Buscamos ordenar tal que C < Near Plane y A > B > Near Plane */
+      if (v1.position.z < v2.position.z){
+        Vertex aux = v1;
+        v2 = v1;
+        v1 = aux;
+      }
+      
+      if (v2.position.z < v3.position.z){
+        Vertex aux = v2;
+        v2 = v3;
+        v3 = aux;
+      }
+      
+      if (v1.position.z < v2.position.z){
+        Vertex aux = v1;
+        v2 = v1;
+        v1 = aux;
+      }
+
+      // Calculamos la intersección con el Near Plane
+      Vertex P = intersectNearPlane(v1, v3, near);
+      Vertex Q = intersectNearPlane(v2, v3, near);
+      /*Acá tenemos:
+           A
+          /|
+         / |
+        /  |
+       B   |
+       \   |
+        P--Q
+      Un triangulo se forma entre A, P y B
+      Y el otro entre P, Q y B*/
+
+      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
+      proyectObject(v1, P, v2, instance.texture, camera, vec_norm, instance.faces[i].a);
+      proyectObject(P, Q, v2, instance.texture, camera, vec_norm, instance.faces[i].a);
+    }
+    else if(cont == 2) { // Dos vertices fuera de la camara
+      // Primero ordenamos A < B < C
+      /*   C
+          /\
+         /  \
+      --P----Q--- Near Plane --> Z = 1
+       /      \
+      A--------B
+      
+      Buscamos ordenar tal que C > Near Plane y A < B < Near Plane */
+      if (v1.position.z > v2.position.z){
+        Vertex aux = v1;
+        v2 = v1;
+        v1 = aux;
+      }
+      
+      if (v2.position.z > v3.position.z){
+        Vertex aux = v2;
+        v2 = v3;
+        v3 = aux;
+      }
+      
+      if (v1.position.z > v2.position.z){
+        Vertex aux = v1;
+        v2 = v1;
+        v1 = aux;
+      }
+
+      // Calculamos la intersección con el Near Plane
+      Vertex P = intersectNearPlane(v3, v1, near);
+      Vertex Q = intersectNearPlane(v3, v2, near);
+
+      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
+      proyectObject(v3, P, Q, instance.texture, camera, vec_norm, instance.faces[i].a);
+    }
+    else{
+      // Si el trangulo está en la camara
+      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
+      proyectObject(v1, v2, v3, instance.texture, camera, vec_norm, instance.faces[i].a);
+    }
+  }
+}
+
+Vertex intersectNearPlane(const Vertex& a, const Vertex& b, float nearPlane)
+{
+    float t = (nearPlane - a.position.z) /
+              (b.position.z - a.position.z);
+
+    Vertex r;
+
+    r.position.x = a.position.x + (b.position.x - a.position.x) * t;
+    r.position.y = a.position.y + (b.position.y - a.position.y) * t;
+    r.position.z = nearPlane;
+
+    r.uv.u = a.uv.u + (b.uv.u - a.uv.u) * t;
+    r.uv.v = a.uv.v + (b.uv.v - a.uv.v) * t;
+
+    return r;
+}
+
+void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& camera, Point vec_norm, int faceA){
+  if (faceVisible(faceA, vec_norm)){
+      Point2D p1 = {(v1.position.x * camera.fov) / v1.position.z + CENTER_X, (v1.position.y  * camera.fov) / v1.position.z + CENTER_Y};
+      Point2D p2 = {(v2.position.x * camera.fov) / v2.position.z + CENTER_X, (v2.position.y  * camera.fov) / v2.position.z + CENTER_Y};
+      Point2D p3 = {(v3.position.x * camera.fov) / v3.position.z + CENTER_X, (v3.position.y  * camera.fov) / v3.position.z + CENTER_Y};
       
       int area = (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y);
 
-      if (area == 0) continue;   // Hay triangulos planos que hay que ignorarlos ya que no se ven practicamente y se pierde potencia de computo el querer dibujarlos
+      if (area == 0) {descartadosArea++ ; return;}   // Hay triangulos planos que hay que ignorarlos ya que no se ven practicamente y se pierde potencia de computo el querer dibujarlos
 
       renderList[trianglesCount].p1 = p1;
       renderList[trianglesCount].p2 = p2;
       renderList[trianglesCount].p3 = p3;
 
-      renderList[trianglesCount].uv1 = instance.texcoords[instance.faces_texcoords[i].a];
-      renderList[trianglesCount].uv2 = instance.texcoords[instance.faces_texcoords[i].b];
-      renderList[trianglesCount].uv3 = instance.texcoords[instance.faces_texcoords[i].c];
+      renderList[trianglesCount].uv1 = v1.uv;
+      renderList[trianglesCount].uv2 = v2.uv;
+      renderList[trianglesCount].uv3 = v3.uv;
 
-      renderList[trianglesCount].texture = &instance.texture;
+      renderList[trianglesCount].texture = &texture;
 
       renderList[trianglesCount].light_intensity = faceIntensity(vec_norm);
-      renderList[trianglesCount].depth = (rotated[instance.faces[i].a].z + rotated[instance.faces[i].b].z + rotated[instance.faces[i].c].z)*0.33;
+      renderList[trianglesCount].depth = (v1.position.z + v2.position.z + v3.position.z)*0.33;
 
       trianglesCount++;
-      if (trianglesCount >= MAX_TRIANGLES){
-          Serial.println("OVERFLOW");
-          return;
-      }
-    }
   }
+  else {descartadosBackface++;}
 }
 
 void renderWorld(Scene& scene)
@@ -228,6 +360,15 @@ void renderWorld(Scene& scene)
     t3-t2,
     t4-t3
   );
+  Serial.printf(
+    "Z:%d  Back:%d  Area:%d\n",
+    descartadosZ,
+    descartadosBackface,
+    descartadosArea
+  );
+  descartadosZ = 0;
+  descartadosBackface = 0;
+  descartadosArea = 0;
 }
 
 void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, LGFX_Sprite *canvas)
@@ -255,7 +396,9 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
 
   // 3. Bucle principal que recorre el triángulo de arriba a abajo (Scanline)
   for (int y = p1.y; y <= p3.y; y++) {
-    
+    if (y < 0) y = 0;
+    else if (y > WIDTH-1) break;
+
     // Puntos de inicio (A) y fin (B) del segmento horizontal actual
     float xa, ua, va;
     float xb, ub, vb;
@@ -297,8 +440,21 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
 
       float u = ua;
       float v = va;
+      
+      int x_start = (int)xa;
+      int x_end = (int)xb;
 
-      for (int x = (int)xa; x <= (int)xb; x++) {
+      if (x_start < 0){
+        int offset = -x_start; // Cuántos píxeles nos pasamos
+        u += du * offset;      // Adelantamos la textura matemáticamente
+        v += dv * offset;
+        x_start = 0;           // Forzamos a empezar en el borde izquierdo de la pantalla
+      }
+      else if (x_end > HEIGHT-1){
+        x_end = HEIGHT-1;
+      }
+
+      for (int x = x_start; x <= x_end; x++) {
         int texX = (int)u % tex.width;
         int texY = (int)v % tex.height;
         if (texX < 0) texX = 0;
@@ -399,7 +555,7 @@ Point normalVector(int a, int b, int c)
     return {nx, ny, nz};
 }
 
-bool faceVisible(int a, Point norm_vec, Camera& camera)
+bool faceVisible(int a, Point norm_vec)
 {
     Point A = rotated[a];
 
@@ -421,5 +577,4 @@ uint16_t faceIntensity(Point norm_vec)
         intensity = MINIMUM_BRITNESS;
 
     // OPTIMIZACIÓN DE LUZ: En vez de usar float usamos punto fijo (0 a 256) y sí evitamos hacer multiplicaciones float por cada píxel.
-    return (uint16_t)(intensity * 256.0f);
-}
+    return (uint16_t)(intensity * 256.0f);}

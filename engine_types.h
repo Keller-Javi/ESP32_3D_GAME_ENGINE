@@ -45,6 +45,12 @@ struct UV
     uint8_t v;
 };
 
+struct Vertex
+{
+    Point position;
+    UV uv;
+};
+
 struct Mesh
 {
     Point16* vertices;

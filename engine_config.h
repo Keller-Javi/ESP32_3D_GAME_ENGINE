@@ -12,8 +12,8 @@
 // SCENE
 #define BACKGROUND        0x0000
 #define MINIMUM_BRITNESS  0.4
-#define MAX_VERTICES      300
-#define MAX_TRIANGLES     600
+#define MAX_VERTICES      500
+#define MAX_TRIANGLES     1000
 #define MAX_OBJECTS       5
 
 #endif
