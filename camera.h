@@ -16,7 +16,7 @@ public:
     void lookAt_vertical(const Point& target);
     void lookAt_horizontal(const Point& target);
 
-    void follow(const Mesh& target, const float distance, float offsetX = 0.0f, float offsetY = 0.0f); // void Camera::follow(const Mesh& target, const float distance, float offsetX = 0, float offsetY = 0)
+    void follow(const Mesh& target, const float distance, float offsetX = 0.0f, float offsetY = 0.0f);
 };
 
 #endif

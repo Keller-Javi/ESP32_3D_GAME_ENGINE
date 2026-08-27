@@ -7,7 +7,7 @@ struct Point {
   float  z;
 };
 
-struct Point16 // Este formato es para ahorrar memoria a costa de presición
+struct Point16 // Este formato es para ahorrar memoria a costa de precisión
 {
     int16_t x;
     int16_t y;
@@ -23,12 +23,6 @@ struct Triangle {
 struct Point2D {
   int x;
   int y;
-};
-
-struct Color { // HASTA EL MOMENTO NO SE USA, ELIMINAR SI NO HACE FALTA
-  uint16_t r;
-  uint16_t g;
-  uint16_t b;
 };
 
 struct Texture

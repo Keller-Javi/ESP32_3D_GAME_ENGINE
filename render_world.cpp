@@ -573,8 +573,8 @@ uint16_t faceIntensity(Point norm_vec)
 {
     float intensity = norm_vec.x*light.x + norm_vec.y*light.y + norm_vec.z*light.z;
 
-    if (intensity < MINIMUM_BRITNESS) // Esto es para añadir iluminación a la escena 
-        intensity = MINIMUM_BRITNESS;
+    if (intensity < MINIMUM_BRIGHTNESS) // Esto es para añadir iluminación a la escena 
+        intensity = MINIMUM_BRIGHTNESS;
 
     // OPTIMIZACIÓN DE LUZ: En vez de usar float usamos punto fijo (0 a 256) y sí evitamos hacer multiplicaciones float por cada píxel.
     return (uint16_t)(intensity * 256.0f);}
