@@ -50,7 +50,7 @@ void setup(void) {
   car2.texture = {128, 128, car4};
 
   terrain.mesh.texture = {128,128,grass};
-  terrain.create(5, 20, 200);
+  terrain.create(20, 20, 200);
   terrain.mesh.position = {30,115,30};
 
   world.numObjects = 0;

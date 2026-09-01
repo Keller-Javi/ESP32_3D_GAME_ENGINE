@@ -1,5 +1,10 @@
 #include "render_world.h"
 
+
+#define UV_FRAC 8
+#define UV_SCALE (1 << UV_FRAC)
+
+
 // LIGHT 
 Point light = {15.0, -1.5, -3};
 
@@ -239,7 +244,7 @@ void prepareObject(Mesh& instance, Camera& camera)
       }
       
       if (v1.position.z > v2.position.z){
-        Vertex aux = v1;
+        Vertex aux = v2;
         v2 = v1;
         v1 = aux;
       }
@@ -333,12 +338,15 @@ void renderWorld(Scene& scene)
   quickSort(0, trianglesCount - 1);
 
   uint32_t t2 = millis();
-  canvas[bufferIdx].fillSprite(BACKGROUND); // Set backgraund color
+  //canvas[bufferIdx].fillSprite(BACKGROUND); // Set backgraund color
+
+  uint16_t* fb = (uint16_t*)canvas[bufferIdx].getBuffer();
+  memset(fb, 0, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
 
   for(int i = 0; i < trianglesCount; i++){
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
-                          *renderList[i].texture, renderList[i].light_intensity, &canvas[bufferIdx]);
+                          *renderList[i].texture, renderList[i].light_intensity, fb);
   }
 
   FPSScreen(&canvas[bufferIdx]);
@@ -371,7 +379,7 @@ void renderWorld(Scene& scene)
   descartadosArea = 0;
 }
 
-void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, LGFX_Sprite *canvas)
+void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer)
 {
   // 1. Ordenar los vértices por Y
   if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }
@@ -435,12 +443,12 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
     // 4. Dibujar la línea horizontal (Segmento de textura)
     float dx = xb - xa;
     if (dx > 0) { // Protección contra división por cero
-      float du = (ub - ua) / dx;
-      float dv = (vb - va) / dx;
+      // Convertir a punto fijo para u, v y sus pasos
+      int32_t u = (int32_t)(ua * UV_SCALE);
+      int32_t v = (int32_t)(va * UV_SCALE);
+      int32_t du = (int32_t)((ub - ua) / dx * UV_SCALE);
+      int32_t dv = (int32_t)((vb - va) / dx * UV_SCALE);
 
-      float u = ua;
-      float v = va;
-      
       int x_start = (int)xa;
       int x_end = (int)xb;
 
@@ -454,11 +462,15 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
         x_end = HEIGHT-1;
       }
 
+      uint16_t texWidthMask = tex.width - 1;
+      uint16_t texHeightMask = tex.height - 1;
+
       for (int x = x_start; x <= x_end; x++) {
-        int texX = (int)u % tex.width;
-        int texY = (int)v % tex.height;
-        if (texX < 0) texX = 0;
+        int texX = (u >> UV_FRAC) & texWidthMask;
+        int texY = (v >> UV_FRAC) & texHeightMask;
+
         // Controlar que las UV no se salgan de la textura
+        if (texX < 0) texX = 0;
         if (texY < 0) texY = 0;
 
         // Leer el color de la textura mapeada
@@ -475,10 +487,10 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
         b = (b * light_intensity) >> 8;
 
         // REEMPAQUETAR en un nuevo uint16_t RGB565
-        uint16_t lit_color = (r << 11) | (g << 5) | b;
+        uint16_t lit_color = ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);
 
         // Pintar en el lienzo virtual
-        canvas->drawPixel(x, y, lit_color);
+        framebuffer[y * HEIGHT + x] = lit_color;
 
         // Avanzar al siguiente píxel de la textura
         u += du;
