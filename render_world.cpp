@@ -44,6 +44,7 @@ void setScreen(int init_screen_time)
   lcd.setColorDepth(COLOR_DEPTH);
 
   initScreen(&canvas[0]);
+
   delay(init_screen_time);
 }
 
