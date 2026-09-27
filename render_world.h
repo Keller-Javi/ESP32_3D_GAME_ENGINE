@@ -6,6 +6,10 @@
 #include "engine_config.h"
 #include "gfx_config.h"
 
+extern bool antialias;
+extern bool cel_shading;
+extern bool bloom;
+
 void setScreen(int init_screen_time);
 void initScreen(LGFX_Sprite *canvas);
 void FPSScreen(LGFX_Sprite *canvas);

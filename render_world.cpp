@@ -1,9 +1,12 @@
 #include "render_world.h"
-
+#include "post_processing.h"
 
 #define UV_FRAC 8
 #define UV_SCALE (1 << UV_FRAC)
 
+bool antialias = true;
+bool cel_shading = false;
+bool bloom = false;
 
 // LIGHT 
 Point light = {15.0, -1.5, -3};
@@ -44,6 +47,8 @@ void setScreen(int init_screen_time)
   lcd.setColorDepth(COLOR_DEPTH);
 
   initScreen(&canvas[0]);
+
+  initPostProcessBuffers(HEIGHT, WIDTH);
 
   delay(init_screen_time);
 }
@@ -342,13 +347,24 @@ void renderWorld(Scene& scene)
   //canvas[bufferIdx].fillSprite(BACKGROUND); // Set backgraund color
 
   uint16_t* fb = (uint16_t*)canvas[bufferIdx].getBuffer();
-  memset(fb, 0, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
+  memset(fb, BACKGROUND, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
 
   for(int i = 0; i < trianglesCount; i++){
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
                           *renderList[i].texture, renderList[i].light_intensity, fb);
   }
+
+  // FILTROS DE POSTPROCESADO EN CASCADA:
+  // Paso 1: Eliminar el ruido de alta frecuencia (aliasing y texturas pixeladas)
+  if (antialias) applyLowPassFIR(fb, HEIGHT, WIDTH);
+
+  // Paso 2: Extraer bordes sobre la señal atenuada (umbral más tolerante)
+  if (cel_shading) applySobelOnSmoothed(fb, HEIGHT, WIDTH, 20);
+
+  // 2. Resplandor Bloom (FIR Separable sobre zonas brillantes)
+  // Umbral 85: sólo las partes muy iluminadas o texturas claras generarán halo
+  if (bloom) applyBloomFIR(fb, HEIGHT, WIDTH, 7);
 
   FPSScreen(&canvas[bufferIdx]);
 

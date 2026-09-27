@@ -10,7 +10,7 @@
 #define COLOR_DEPTH       16  // Don't change this, because I work with pointers of 16 bits.
 
 // SCENE
-#define BACKGROUND        0x0000
+#define BACKGROUND        0xb73d
 #define MINIMUM_BRIGHTNESS  0.4
 #define MAX_VERTICES      500
 #define MAX_TRIANGLES     1000

@@ -2,11 +2,19 @@
 #include "assets.h"
 #include "terrain.h"
 
+#define BTN_ANTIALIAS 15
+#define BTN_CEL_SHADING 16
+#define BTN_BLOOM 17
+
 #define PI 3.14
 
 Scene world;
 Camera camera;
 Terrain terrain;
+
+bool lastAntialiasButton = HIGH;
+bool lastCelButton = HIGH;
+bool lastBloomButton = HIGH;
 
 // Handle para la tarea de renderizado
 TaskHandle_t RenderTaskHandle = NULL;
@@ -33,6 +41,10 @@ Mesh car2;
 
 void setup(void) {
   Serial.begin(115200);
+
+  pinMode(BTN_ANTIALIAS, INPUT_PULLUP);
+  pinMode(BTN_CEL_SHADING, INPUT_PULLUP);
+  pinMode(BTN_BLOOM, INPUT_PULLUP);
 
   setScreen(1500);
   
@@ -67,7 +79,7 @@ void setup(void) {
   car2.texture = {128, 128, car4};
 
   terrain.mesh.texture = {128,128,grass};
-  terrain.create(20, 20, 200);
+  terrain.create(15, 20, 150);
   terrain.mesh.position = {500,125,250};
 
   world.numObjects = 0;
@@ -89,8 +101,34 @@ void setup(void) {
 
 
 void loop() {
+  // =========================
+  // Botones de configuración
+  // =========================
+
+  bool antialiasButton = digitalRead(BTN_ANTIALIAS);
+  bool celButton       = digitalRead(BTN_CEL_SHADING);
+  bool bloomButton     = digitalRead(BTN_BLOOM);
+
+  // Detectar nueva pulsación
+  if (lastAntialiasButton == HIGH && antialiasButton == LOW) {
+    antialias = !antialias;
+  }
+
+  if (lastCelButton == HIGH && celButton == LOW) {
+    cel_shading = !cel_shading;
+  }
+
+  if (lastBloomButton == HIGH && bloomButton == LOW) {
+    bloom = !bloom;
+  }
+
+  lastAntialiasButton = antialiasButton;
+  lastCelButton = celButton;
+  lastBloomButton = bloomButton;
+
+
 	// Lógica del juego
-  if ((car.position.z < -1200) || (car.position.z > 700)){
+  if ((car.position.z < -800) || (car.position.z > 700)){
     velocity_translate = -velocity_translate;
     if (car.rotation.y == 0) car.rotation.y = PI;
     else car.rotation.y = 0;
@@ -98,7 +136,7 @@ void loop() {
 
   car.position.z += velocity_translate;
 
-  camera.follow(car, 350, 100, 250);
+  camera.follow(car, 250, 100, 200);
 	
 	//Actualización de la escena
   // --- Sincronización con Core 0 ---
