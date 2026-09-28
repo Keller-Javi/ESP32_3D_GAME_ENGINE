@@ -3,15 +3,16 @@
 
 #include <Arduino.h>
 
-// Inicialización de buffers en PSRAM
+// Inicializa la memoria en PSRAM una sola vez al inicio
 void initPostProcessBuffers(int width, int height);
 
-// Cel-Shading (FIR Pasa-Bajos + FIR Sobel)
-void applyLowPassFIR(uint16_t* fb, int width, int height);
-void applySobelOnSmoothed(uint16_t* fb, int width, int height, uint8_t threshold);
+void applyScreenAntiAlias(uint16_t* fb, int width, int height);
 
-// Bloom (FIR Separable 5-taps)
-// thresholdLuma: 0 a 125 (típico: 75 a 100 para capturar solo zonas muy brillantes)
-void applyBloomFIR(uint16_t* fb, int width, int height, uint8_t thresholdLuma);
+// Anti-aliasing lineal FIR pasa-bajos (Convolución Gaussiana 3x3)
+void applyScreenAntiAlias_Gaussian(uint16_t* fb, int width, int height);
+
+void applyCelShading(uint16_t* fb, int width, int height, uint8_t threshold);
+
+void applyBloom(uint16_t* fb, int width, int height, uint8_t threshold);
 
 #endif

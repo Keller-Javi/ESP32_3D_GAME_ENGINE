@@ -355,16 +355,12 @@ void renderWorld(Scene& scene)
                           *renderList[i].texture, renderList[i].light_intensity, fb);
   }
 
-  // FILTROS DE POSTPROCESADO EN CASCADA:
-  // Paso 1: Eliminar el ruido de alta frecuencia (aliasing y texturas pixeladas)
-  if (antialias) applyLowPassFIR(fb, HEIGHT, WIDTH);
+  // FILTROS DE POSTPROCESADO EN CASCADA
+  if (antialias) applyScreenAntiAlias(fb, HEIGHT, WIDTH);
 
-  // Paso 2: Extraer bordes sobre la señal atenuada (umbral más tolerante)
-  if (cel_shading) applySobelOnSmoothed(fb, HEIGHT, WIDTH, 20);
+  if (cel_shading) applyScreenAntiAlias_Gaussian(fb, HEIGHT, WIDTH);//applyCelShading(fb, HEIGHT, WIDTH, 45);
 
-  // 2. Resplandor Bloom (FIR Separable sobre zonas brillantes)
-  // Umbral 85: sólo las partes muy iluminadas o texturas claras generarán halo
-  if (bloom) applyBloomFIR(fb, HEIGHT, WIDTH, 7);
+  if (bloom) applyCelShading(fb, HEIGHT, WIDTH, 15); //applyBloom(fb, HEIGHT, WIDTH, 175);
 
   FPSScreen(&canvas[bufferIdx]);
 

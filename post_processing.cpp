@@ -1,171 +1,210 @@
-#include "post_processing.h"
+#include "POST_PROCESSING.h"
+#include <esp_heap_caps.h>
+#include <stdlib.h>
 
-// Buffers en PSRAM
-static uint8_t*  lumSmooth  = nullptr;
-static uint16_t* bloomPing  = nullptr;
-static uint16_t* bloomPong  = nullptr;
+// Puntero para el búfer auxiliar en PSRAM
+static uint16_t* temp_fb = nullptr;
+static int allocated_pixels = 0;
 
-// ============================================================================
-// ABSTRACCIÓN DE FORMATO DE COLOR (Zero-Cost Inlining)
-// ============================================================================
+// Extrae canales de RGB565 (R: 5 bits, G: 6 bits, B: 5 bits)
+static inline void unpackRGB565(uint16_t c, uint8_t &r, uint8_t &g, uint8_t &b) {
+    r = (c >> 11) & 0x1F;
+    g = (c >> 5)  & 0x3F;
+    b =  c        & 0x1F;
+}
 
-// Desempaquetado
-static inline void unpackColor(uint16_t c, uint8_t &r, uint8_t &g, uint8_t &b) {
-    b = (c >> 8) & 0x1F;
+// Empaqueta componentes a formato RGB565
+static inline uint16_t packRGB565(uint8_t r, uint8_t g, uint8_t b) {
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+// Desempaqueta según el orden de bits que envías por SPI/DMA
+static inline void unpackScreenRGB565(uint16_t c, uint8_t &r, uint8_t &g, uint8_t &b) {
     r = (c >> 3) & 0x1F;
-    g = ((c & 0x07) << 3) | ((c >> 13) & 0x07);
+    g = (uint8_t)(((c & 0x07) << 3) | ((c >> 13) & 0x07));
+    b = (c >> 8) & 0x1F;
 }
 
-// Tu función de empaquetado original
-static inline uint16_t packColor(uint8_t r, uint8_t g, uint8_t b) {
-    return ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);
+// Reempaqueta con tu fórmula exacta para la pantalla
+static inline uint16_t packScreenRGB565(uint8_t r, uint8_t g, uint8_t b) {
+    return (uint16_t)(((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3));
 }
 
-// Cálculo de Luminancia perceptualmente ponderada para DSP:
-// Y ≈ 0.299*R + 0.587*G + 0.114*B (Aproximación en punto fijo rápido)
-static inline uint8_t getFastLuminance(uint16_t color) {
-    uint8_t r, g, b;
-    unpackColor(color, r, g, b);
-    // Ponderación de brillo: el ojo humano percibe mucho más el canal verde
-    return (uint8_t)((r * 2 + g * 4 + b * 1) >> 3);
+// Búsqueda de mediana de 9 elementos mediante ordenamiento por inserción
+static inline uint8_t median9(uint8_t a[9]) {
+    for (int i = 1; i < 9; ++i) {
+        uint8_t val = a[i];
+        int j = i - 1;
+        while (j >= 0 && a[j] > val) {
+            a[j + 1] = a[j];
+            j--;
+        }
+        a[j + 1] = val;
+    }
+    return a[4]; // El elemento central (índice 4) es la mediana
 }
-
-// ============================================================================
-// GESTIÓN DE MEMORIA
-// ============================================================================
 
 void initPostProcessBuffers(int width, int height) {
-    if (!lumSmooth) {
-        lumSmooth = (uint8_t*)ps_malloc(width * height * sizeof(uint8_t));
+    int total_pixels = width * height;
+    
+    // Si ya existe y el tamaño es diferente, liberamos
+    if (temp_fb != nullptr && allocated_pixels != total_pixels) {
+        free(temp_fb);
+        temp_fb = nullptr;
     }
-    if (!bloomPing) {
-        bloomPing = (uint16_t*)ps_malloc(width * height * sizeof(uint16_t));
-    }
-    if (!bloomPong) {
-        bloomPong = (uint16_t*)ps_malloc(width * height * sizeof(uint16_t));
-    }
-}
 
-// ============================================================================
-// FILTROS FIR DE CEL-SHADING
-// ============================================================================
-
-void applyLowPassFIR(uint16_t* fb, int width, int height) {
-    for (int y = 1; y < height - 1; y++) {
-        int rowPrev = (y - 1) * width;
-        int rowCurr = y * width;
-        int rowNext = (y + 1) * width;
-
-        for (int x = 1; x < width - 1; x++) {
-            uint32_t sum = 
-                (getFastLuminance(fb[rowPrev + x - 1]) * 1) +
-                (getFastLuminance(fb[rowPrev + x    ]) * 2) +
-                (getFastLuminance(fb[rowPrev + x + 1]) * 1) +
-                (getFastLuminance(fb[rowCurr + x - 1]) * 2) +
-                (getFastLuminance(fb[rowCurr + x    ]) * 4) +
-                (getFastLuminance(fb[rowCurr + x + 1]) * 2) +
-                (getFastLuminance(fb[rowNext + x - 1]) * 1) +
-                (getFastLuminance(fb[rowNext + x    ]) * 2) +
-                (getFastLuminance(fb[rowNext + x + 1]) * 1);
-
-            lumSmooth[rowCurr + x] = sum >> 4;
+    if (temp_fb == nullptr) {
+        // Reservamos memoria específicamente en la PSRAM externa
+        temp_fb = (uint16_t*) heap_caps_malloc(total_pixels * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+        if (temp_fb != nullptr) {
+            allocated_pixels = total_pixels;
         }
     }
 }
 
-void applySobelOnSmoothed(uint16_t* fb, int width, int height, uint8_t threshold) {
-    for (int y = 1; y < height - 1; y++) {
-        int rowPrev = (y - 1) * width;
-        int rowCurr = y * width;
-        int rowNext = (y + 1) * width;
+void applyScreenAntiAlias(uint16_t* fb, int width, int height) {
+    // Si no hay PSRAM disponible o el puntero es nulo, salir para evitar pánicos del kernel
+    if (!fb || !temp_fb) return;
 
-        for (int x = 1; x < width - 1; x++) {
-            int16_t gx = (-1 * lumSmooth[rowPrev + x - 1]) + ( 1 * lumSmooth[rowPrev + x + 1])
-                       + (-2 * lumSmooth[rowCurr + x - 1]) + ( 2 * lumSmooth[rowCurr + x + 1])
-                       + (-1 * lumSmooth[rowNext + x - 1]) + ( 1 * lumSmooth[rowNext + x + 1]);
+    // Copiamos el contenido original al búfer auxiliar de lectura
+    memcpy(temp_fb, fb, width * height * sizeof(uint16_t));
 
-            int16_t gy = (-1 * lumSmooth[rowPrev + x - 1]) + (-2 * lumSmooth[rowPrev + x]) + (-1 * lumSmooth[rowPrev + x + 1])
-                       + ( 1 * lumSmooth[rowNext + x - 1]) + ( 2 * lumSmooth[rowNext + x]) + ( 1 * lumSmooth[rowNext + x + 1]);
+    uint8_t r_win[9];
+    uint8_t g_win[9];
+    uint8_t b_win[9];
 
-            int16_t mag = abs(gx) + abs(gy);
+    // Procesamiento con ventana de 3x3 (excluyendo el borde exterior de 1px)
+    for (int y = 1; y < height - 1; ++y) {
+        int row_prev = (y - 1) * width;
+        int row_curr = y * width;
+        int row_next = (y + 1) * width;
 
-            if (mag > threshold) {
-                fb[rowCurr + x] = 0x0000;
+        for (int x = 1; x < width - 1; ++x) {
+            // Muestreo del vecindario W de 3x3 del búfer fuente
+            uint16_t neighbors[9] = {
+                temp_fb[row_prev + (x - 1)], temp_fb[row_prev + x], temp_fb[row_prev + (x + 1)],
+                temp_fb[row_curr + (x - 1)], temp_fb[row_curr + x], temp_fb[row_curr + (x + 1)],
+                temp_fb[row_next + (x - 1)], temp_fb[row_next + x], temp_fb[row_next + (x + 1)]
+            };
+
+            // Desempaquetado canal por canal (Marginal Median Filter)
+            for (int i = 0; i < 9; ++i) {
+                unpackRGB565(neighbors[i], r_win[i], g_win[i], b_win[i]);
+            }
+
+            // Cálculo de la mediana independiente por componente
+            uint8_t r_med = median9(r_win);
+            uint8_t g_med = median9(g_win);
+            uint8_t b_med = median9(b_win);
+
+            // Escritura del valor filtrado en el framebuffer de destino
+            fb[row_curr + x] = packRGB565(r_med, g_med, b_med);
+        }
+    }
+}
+
+
+void applyScreenAntiAlias_Gaussian(uint16_t* fb, int width, int height) {
+    if (!fb || !temp_fb) return;
+
+    // Copia al búfer auxiliar para evitar retroalimentación en la convolución
+    memcpy(temp_fb, fb, width * height * sizeof(uint16_t));
+
+    for (int y = 1; y < height - 1; ++y) {
+        int row_prev = (y - 1) * width;
+        int row_curr = y * width;
+        int row_next = (y + 1) * width;
+
+        for (int x = 1; x < width - 1; ++x) {
+            uint16_t n[9] = {
+                temp_fb[row_prev + (x - 1)], temp_fb[row_prev + x], temp_fb[row_prev + (x + 1)],
+                temp_fb[row_curr + (x - 1)], temp_fb[row_curr + x], temp_fb[row_curr + (x + 1)],
+                temp_fb[row_next + (x - 1)], temp_fb[row_next + x], temp_fb[row_next + (x + 1)]
+            };
+
+            uint8_t r[9], g[9], b[9];
+            for (int i = 0; i < 9; ++i) {
+                unpackScreenRGB565(n[i], r[i], g[i], b[i]);
+            }
+
+            // Convolución FIR 2D por canal (pesos binomiales: 1, 2, 4)
+            uint32_t r_sum = r[0] + (r[1] << 1) + r[2]
+                           + (r[3] << 1) + (r[4] << 2) + (r[5] << 1)
+                           + r[6] + (r[7] << 1) + r[8];
+
+            uint32_t g_sum = g[0] + (g[1] << 1) + g[2]
+                           + (g[3] << 1) + (g[4] << 2) + (g[5] << 1)
+                           + g[6] + (g[7] << 1) + g[8];
+
+            uint32_t b_sum = b[0] + (b[1] << 1) + b[2]
+                           + (b[3] << 1) + (b[4] << 2) + (b[5] << 1)
+                           + b[6] + (b[7] << 1) + b[8];
+
+            // División por 16 (>> 4) y reempaquetado compatible con pantalla
+            fb[row_curr + x] = packScreenRGB565(r_sum >> 4, g_sum >> 4, b_sum >> 4);
+        }
+    }
+}
+
+
+// Calcula luminancia Y en escala 0..250 (Y = 0.299R + 0.587G + 0.114B)
+// r: 0..31, g: 0..63, b: 0..31
+static inline uint8_t getLuminance(uint8_t r, uint8_t g, uint8_t b) {
+    // 616*r + 600*g + 232*b cabe en uint16_t (máximo 64088)
+    return (uint8_t)((616 * (uint16_t)r + 600 * (uint16_t)g + 232 * (uint16_t)b) >> 8);
+}
+
+void applyCelShading(uint16_t* fb, int width, int height, uint8_t threshold) {
+    if (!fb || !temp_fb) return;
+
+    // Copia al búfer auxiliar para evitar retroalimentación en la convolución
+    memcpy(temp_fb, fb, width * height * sizeof(uint16_t));
+
+    for (int y = 1; y < height - 1; ++y) {
+        int row_prev = (y - 1) * width;
+        int row_curr = y * width;
+        int row_next = (y + 1) * width;
+
+        for (int x = 1; x < width - 1; ++x) {
+            // Muestreo de la ventana 3x3 en el búfer auxiliar
+            uint16_t n[9] = {
+                temp_fb[row_prev + (x - 1)], temp_fb[row_prev + x], temp_fb[row_prev + (x + 1)],
+                temp_fb[row_curr + (x - 1)], temp_fb[row_curr + x], temp_fb[row_curr + (x + 1)],
+                temp_fb[row_next + (x - 1)], temp_fb[row_next + x], temp_fb[row_next + (x + 1)]
+            };
+
+            // Extracción de canales y cálculo de luminancia para cada celda
+            uint8_t lum[9];
+
+            for (int i = 0; i < 9; ++i) {
+                uint8_t r, g, b;
+                unpackScreenRGB565(n[i], r, g, b);
+                lum[i] = getLuminance(r, g, b);
+            }
+
+            // --- FILTRO DE SOBEL (Pasa-altos direccional) ---
+            // Gradiente Horizontal Gx (K_x: Sobel Vertical)
+            // [-1, 0, 1; -2, 0, 2; -1, 0, 1]
+            int16_t gx = ((int16_t)lum[2] + ((int16_t)lum[5] << 1) + (int16_t)lum[8])
+                       - ((int16_t)lum[0] + ((int16_t)lum[3] << 1) + (int16_t)lum[6]);
+
+            // Gradiente Vertical Gy (K_y: Sobel Horizontal)
+            // [-1, -2, -1; 0, 0, 0; 1, 2, 1]
+            int16_t gy = ((int16_t)lum[6] + ((int16_t)lum[7] << 1) + (int16_t)lum[8])
+                       - ((int16_t)lum[0] + ((int16_t)lum[1] << 1) + (int16_t)lum[2]);
+
+            // Magnitud del gradiente normalizada al rango 0..255 (división por 4 con >> 2)
+            uint16_t g_mag = (abs(gx) + abs(gy)) >> 2;
+
+            if (g_mag > threshold) {
+                // DISCONTINUIDAD DETECTADA: Tinta negra de contorno
+                fb[row_curr + x] = 0x0000;
             }
         }
     }
 }
 
-// ============================================================================
-// BLOOM MULTIFORMATO
-// ============================================================================
 
-void applyBloomFIR(uint16_t* fb, int width, int height, uint8_t thresholdLuma) {
-    int totalPixels = width * height;
-
-    // Etapa 1: Bright-Pass (Aislar fuentes de alta emisión lumínica)
-    for (int i = 0; i < totalPixels; i++) {
-        uint16_t c = fb[i];
-        if (getFastLuminance(c) >= thresholdLuma) {
-            bloomPing[i] = c;
-        } else {
-            bloomPing[i] = 0x0000;
-        }
-    }
-
-    // Etapa 2A: Pasada Horizontal FIR [1, 4, 6, 4, 1] / 16 (bloomPing -> bloomPong)
-    for (int y = 0; y < height; y++) {
-        int row = y * width;
-        for (int x = 2; x < width - 2; x++) {
-            uint8_t r0, g0, b0, r1, g1, b1, r2, g2, b2, r3, g3, b3, r4, g4, b4;
-            unpackColor(bloomPing[row + x - 2], r0, g0, b0);
-            unpackColor(bloomPing[row + x - 1], r1, g1, b1);
-            unpackColor(bloomPing[row + x    ], r2, g2, b2);
-            unpackColor(bloomPing[row + x + 1], r3, g3, b3);
-            unpackColor(bloomPing[row + x + 2], r4, g4, b4);
-
-            uint16_t r = (r0 * 1 + r1 * 4 + r2 * 6 + r3 * 4 + r4 * 1) >> 4;
-            uint16_t g = (g0 * 1 + g1 * 4 + g2 * 6 + g3 * 4 + g4 * 1) >> 4;
-            uint16_t b = (b0 * 1 + b1 * 4 + b2 * 6 + b3 * 4 + b4 * 1) >> 4;
-
-            bloomPong[row + x] = packColor((uint8_t)r, (uint8_t)g, (uint8_t)b);
-        }
-    }
-
-    // Etapa 2B: Pasada Vertical FIR [1, 4, 6, 4, 1] / 16 + Mezcla Aditiva con Saturación
-    for (int y = 2; y < height - 2; y++) {
-        int row0 = (y - 2) * width;
-        int row1 = (y - 1) * width;
-        int row2 =  y      * width;
-        int row3 = (y + 1) * width;
-        int row4 = (y + 2) * width;
-
-        for (int x = 2; x < width - 2; x++) {
-            uint8_t r0, g0, b0, r1, g1, b1, r2, g2, b2, r3, g3, b3, r4, g4, b4;
-            unpackColor(bloomPong[row0 + x], r0, g0, b0);
-            unpackColor(bloomPong[row1 + x], r1, g1, b1);
-            unpackColor(bloomPong[row2 + x], r2, g2, b2);
-            unpackColor(bloomPong[row3 + x], r3, g3, b3);
-            unpackColor(bloomPong[row4 + x], r4, g4, b4);
-
-            uint16_t glowR = (r0 * 1 + r1 * 4 + r2 * 6 + r3 * 4 + r4 * 1) >> 4;
-            uint16_t glowG = (g0 * 1 + g1 * 4 + g2 * 6 + g3 * 4 + g4 * 1) >> 4;
-            uint16_t glowB = (b0 * 1 + b1 * 4 + b2 * 6 + b3 * 4 + b4 * 1) >> 4;
-
-            // Extraer color base original
-            uint8_t baseR, baseG, baseB;
-            unpackColor(fb[row2 + x], baseR, baseG, baseB);
-
-            // Suma aditiva con saturación independiente por canal
-            uint16_t finalR = baseR + glowR;
-            uint16_t finalG = baseG + glowG;
-            uint16_t finalB = baseB + glowB;
-
-            if (finalR > 31) finalR = 31;
-            if (finalG > 63) finalG = 63;
-            if (finalB > 31) finalB = 31;
-
-            fb[row2 + x] = packColor((uint8_t)finalR, (uint8_t)finalG, (uint8_t)finalB);
-        }
-    }
-} 
+void applyBloom(uint16_t* fb, int width, int height, uint8_t threshold){
+    return;
+}
