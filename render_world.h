@@ -6,10 +6,12 @@
 #include "engine_config.h"
 #include "gfx_config.h"
 
-extern bool antialias;
-extern bool cel_shading;
-extern bool bloom;
+extern uint8_t blur;
+extern uint8_t cel_shading;
+extern uint8_t antialias;
+extern uint8_t bloom;
 
+void update(Scene &world);
 void setScreen(int init_screen_time);
 void initScreen(LGFX_Sprite *canvas);
 void FPSScreen(LGFX_Sprite *canvas);
@@ -25,6 +27,7 @@ void quickSort(int low, int high);
 Point normalVector(int a, int b, int c);
 bool faceVisible(int a, Point norm_vec);
 uint16_t faceIntensity(Point norm_vec);
+void initTasks();
 
 #endif
 

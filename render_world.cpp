@@ -4,9 +4,15 @@
 #define UV_FRAC 8
 #define UV_SCALE (1 << UV_FRAC)
 
-bool antialias = true;
-bool cel_shading = false;
-bool bloom = false;
+uint8_t blur = 0;
+uint8_t cel_shading = 0;
+uint8_t antialias = 0;
+uint8_t bloom = 0;
+
+// Handle para la tarea de renderizado
+TaskHandle_t RenderTaskHandle = NULL;
+
+Scene actualScene;
 
 // LIGHT 
 Point light = {15.0, -1.5, -3};
@@ -49,6 +55,8 @@ void setScreen(int init_screen_time)
   initScreen(&canvas[0]);
 
   initPostProcessBuffers(HEIGHT, WIDTH);
+
+  initTasks();
 
   delay(init_screen_time);
 }
@@ -355,12 +363,65 @@ void renderWorld(Scene& scene)
                           *renderList[i].texture, renderList[i].light_intensity, fb);
   }
 
-  // FILTROS DE POSTPROCESADO EN CASCADA
-  if (antialias) applyScreenAntiAlias(fb, HEIGHT, WIDTH);
+  // Postprocesado: Blur
+  switch(blur){
+    case 1: {
+      uint32_t t = millis();
+      applyBlur_Average(fb, HEIGHT, WIDTH);
+      Serial.printf("Blur (Average): %lu ms\n", millis() - t);
+      break;
+    }
+    case 2: {
+      uint32_t t = millis();
+      applyBlur_Gaussian(fb, HEIGHT, WIDTH);
+      Serial.printf("Blur (Gaussian): %lu ms\n", millis() - t);
+      break;
+    }
+    default:
+      break;
+  }
 
-  if (cel_shading) applyScreenAntiAlias_Gaussian(fb, HEIGHT, WIDTH);//applyCelShading(fb, HEIGHT, WIDTH, 45);
+  // Postprocesado: Antialiasing
+  switch(antialias){
+    case 1: {
+      uint32_t t = millis();
+      applyAntialiassing_Sobel(fb, HEIGHT, WIDTH, 45);
+      Serial.printf("Antialias (Sobel): %lu ms\n", millis() - t);
+      break;
+    }
+    case 2: {
+      uint32_t t = millis();
+      applyAntialiassing_Laplacian(fb, HEIGHT, WIDTH, 5);
+      Serial.printf("Antialias (Laplacian): %lu ms\n", millis() - t);
+      break;
+    }
+    case 3: {
+      uint32_t t = millis();
+      applyAntialiassing_SobelMedian(fb, HEIGHT, WIDTH, 45);
+      Serial.printf("Antialias (Laplacian): %lu ms\n", millis() - t);
+      break;
+    }
+    default:
+      break;
+  }
 
-  if (bloom) applyCelShading(fb, HEIGHT, WIDTH, 15); //applyBloom(fb, HEIGHT, WIDTH, 175);
+  // Postprocesado: Cel-Shading
+  switch(cel_shading){
+    case 1: {
+      uint32_t t = millis();
+      applyCelShading_Sobel(fb, HEIGHT, WIDTH, 25);
+      Serial.printf("Cel-shading (Sobel): %lu ms\n", millis() - t);
+      break;
+    }
+    case 2: {
+      uint32_t t = millis();
+      applyCelShading_Laplacian(fb, HEIGHT, WIDTH, 20);
+      Serial.printf("Cel-shading (Laplacian): %lu ms\n", millis() - t);
+      break;
+    }
+    default:
+      break;
+  }
 
   FPSScreen(&canvas[bufferIdx]);
 
@@ -603,3 +664,39 @@ uint16_t faceIntensity(Point norm_vec)
 
     // OPTIMIZACIÓN DE LUZ: En vez de usar float usamos punto fijo (0 a 256) y sí evitamos hacer multiplicaciones float por cada píxel.
     return (uint16_t)(intensity * 256.0f);}
+
+// Tarea exclusiva del Core 0
+void RenderTask(void *pvParameters) {
+  for (;;) {
+    // 1. Espera a que el Core 1 le ordene dibujar
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    // 2. Ejecuta el pipeline completo de render y display
+    renderWorld(actualScene);
+
+    // 3. Cede control para alimentar al Watchdog del Core 0
+    vTaskDelay(1 / portTICK_PERIOD_MS);
+  }
+}
+
+void initTasks(){
+  // Crear la tarea anclada al Core 0
+  xTaskCreatePinnedToCore(
+    RenderTask,         // Función
+    "RenderEngineTask", // Nombre
+    8192,               // Stack size en palabras/bytes
+    NULL,               // Parámetros
+    1,                  // Prioridad
+    &RenderTaskHandle,  // Handle
+    0                   // Core ID (0)
+  );
+}
+
+void update(Scene &world){
+  actualScene = world;
+  //Actualización de la escena
+  // --- Sincronización con Core 0 ---
+  if (RenderTaskHandle != NULL) {
+    xTaskNotifyGive(RenderTaskHandle); // Dispara el render
+  }
+}

@@ -2,9 +2,10 @@
 #include "assets.h"
 #include "terrain.h"
 
-#define BTN_ANTIALIAS 15
+#define BTN_BLUR 15
 #define BTN_CEL_SHADING 16
-#define BTN_BLOOM 17
+#define BTN_ANTIALIAS 17
+#define BTN_BLOOM 18
 
 #define PI 3.14
 
@@ -13,25 +14,9 @@ Camera camera;
 Terrain terrain;
 
 bool lastAntialiasButton = HIGH;
-bool lastCelButton = HIGH;
-bool lastBloomButton = HIGH;
-
-// Handle para la tarea de renderizado
-TaskHandle_t RenderTaskHandle = NULL;
-
-// Tarea exclusiva del Core 0
-void RenderTask(void *pvParameters) {
-  for (;;) {
-    // 1. Espera a que el Core 1 le ordene dibujar
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-    // 2. Ejecuta el pipeline completo de render y display
-    renderWorld(world);
-
-    // 3. Cede control para alimentar al Watchdog del Core 0
-    vTaskDelay(1 / portTICK_PERIOD_MS);
-  }
-}
+bool lastCelButton       = HIGH;
+bool lastBloomButton     = HIGH;
+bool lastBlurButton      = HIGH;
 
 // Movement
 float velocity_translate = 4.0;
@@ -45,6 +30,7 @@ void setup(void) {
   pinMode(BTN_ANTIALIAS, INPUT_PULLUP);
   pinMode(BTN_CEL_SHADING, INPUT_PULLUP);
   pinMode(BTN_BLOOM, INPUT_PULLUP);
+  pinMode(BTN_BLUR, INPUT_PULLUP);
 
   setScreen(1500);
   
@@ -86,17 +72,6 @@ void setup(void) {
   world.objects[world.numObjects++] = &car;
   world.objects[world.numObjects++] = &car2;
   world.objects[world.numObjects++] = &terrain.mesh;
-
-  // Crear la tarea anclada al Core 0
-  xTaskCreatePinnedToCore(
-    RenderTask,         // Función
-    "RenderEngineTask", // Nombre
-    8192,               // Stack size en palabras/bytes
-    NULL,               // Parámetros
-    1,                  // Prioridad
-    &RenderTaskHandle,  // Handle
-    0                   // Core ID (0)
-  );
 }
 
 
@@ -108,26 +83,41 @@ void loop() {
   bool antialiasButton = digitalRead(BTN_ANTIALIAS);
   bool celButton       = digitalRead(BTN_CEL_SHADING);
   bool bloomButton     = digitalRead(BTN_BLOOM);
+  bool blurButton     = digitalRead(BTN_BLUR);
 
   // Detectar nueva pulsación
   if (lastAntialiasButton == HIGH && antialiasButton == LOW) {
-    antialias = !antialias;
+    antialias++;
+
+    if (antialias == 4) antialias = 0;
   }
 
   if (lastCelButton == HIGH && celButton == LOW) {
-    cel_shading = !cel_shading;
+    cel_shading++;
+
+    if (cel_shading == 3) cel_shading = 0;
   }
 
   if (lastBloomButton == HIGH && bloomButton == LOW) {
-    bloom = !bloom;
+    bloom++;
+
+    if (bloom == 3) bloom = 0;
+  }
+
+  if (lastBlurButton == HIGH && blurButton == LOW) {
+    blur++;
+
+    if (blur == 3) blur = 0;
   }
 
   lastAntialiasButton = antialiasButton;
-  lastCelButton = celButton;
-  lastBloomButton = bloomButton;
+  lastCelButton       = celButton;
+  lastBloomButton     = bloomButton;
+  lastBlurButton      = blurButton;
 
-
-	// Lógica del juego
+  // =====================================================
+  // LÓGICA DEL JUEGO
+  // =====================================================
   if ((car.position.z < -800) || (car.position.z > 700)){
     velocity_translate = -velocity_translate;
     if (car.rotation.y == 0) car.rotation.y = PI;
@@ -138,12 +128,9 @@ void loop() {
 
   camera.follow(car, 250, 100, 200);
 	
-	//Actualización de la escena
-  // --- Sincronización con Core 0 ---
-  if (RenderTaskHandle != NULL) {
-    xTaskNotifyGive(RenderTaskHandle); // Dispara el render
-  }
+	update(world);
 
   // Pequeña pausa o delay de framerate para no saturar el bus
   vTaskDelay(pdMS_TO_TICKS(16)); // ~60 FPS para la lógica
 }
+
