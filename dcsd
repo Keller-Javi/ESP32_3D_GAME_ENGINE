@@ -1,299 +1,0 @@
-[1mdiff --git a/ESP32_Retro_Console.ino b/ESP32_Retro_Console.ino[m
-[1mindex 34360cb..246b90d 100644[m
-[1m--- a/ESP32_Retro_Console.ino[m
-[1m+++ b/ESP32_Retro_Console.ino[m
-[36m@@ -8,25 +8,8 @@[m [mScene world;[m
- Camera camera;[m
- Terrain terrain;[m
- [m
-[31m-// Handle para la tarea de renderizado[m
-[31m-TaskHandle_t RenderTaskHandle = NULL;[m
-[31m-[m
-[31m-// Tarea exclusiva del Core 0[m
-[31m-void RenderTask(void *pvParameters) {[m
-[31m-  for (;;) {[m
-[31m-    // 1. Espera a que el Core 1 le ordene dibujar[m
-[31m-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);[m
-[31m-[m
-[31m-    // 2. Ejecuta el pipeline completo de render y display[m
-[31m-    renderWorld(world);[m
-[31m-[m
-[31m-    // 3. Cede control para alimentar al Watchdog del Core 0[m
-[31m-    vTaskDelay(1 / portTICK_PERIOD_MS);[m
-[31m-  }[m
-[31m-}[m
-[31m-[m
- // Movement[m
-[31m-float velocity_translate = 4.0;[m
-[32m+[m[32mfloat velocity_translate = 4.5;[m
- [m
- Mesh car;[m
- Mesh car2;[m
-[36m@@ -62,35 +45,24 @@[m [mvoid setup(void) {[m
-   car2.faces_texcoords = car_faces_texcoords;[m
-   car2.numVertices = sizeof(car_vertices)/sizeof(car_vertices[0]);[m
-   car2.numFaces = sizeof(car_faces)/sizeof(car_faces[0]);[m
-[31m-  car2.position = {-100, 100, -150};[m
-[32m+[m[32m  car2.position = {-100, 100, 450};[m
-   car2.rotation = {PI, PI, 0};[m
-   car2.texture = {128, 128, car4};[m
- [m
-   terrain.mesh.texture = {128,128,grass};[m
-   terrain.create(20, 20, 200);[m
-[31m-  terrain.mesh.position = {500,125,250};[m
-[32m+[m[32m  terrain.mesh.position = {30,115,30};[m
- [m
-   world.numObjects = 0;[m
-   world.objects[world.numObjects++] = &car;[m
-   world.objects[world.numObjects++] = &car2;[m
-   world.objects[world.numObjects++] = &terrain.mesh;[m
-[31m-[m
-[31m-  // Crear la tarea anclada al Core 0[m
-[31m-  xTaskCreatePinnedToCore([m
-[31m-    RenderTask,         // Función[m
-[31m-    "RenderEngineTask", // Nombre[m
-[31m-    8192,               // Stack size en palabras/bytes[m
-[31m-    NULL,               // Parámetros[m
-[31m-    1,                  // Prioridad[m
-[31m-    &RenderTaskHandle,  // Handle[m
-[31m-    0                   // Core ID (0)[m
-[31m-  );[m
- }[m
- [m
- [m
- void loop() {[m
- 	// Lógica del juego[m
-[31m-  if ((car.position.z < -1200) || (car.position.z > 700)){[m
-[32m+[m[32m  if ((car.position.z < -150) || (car.position.z > 1000)){[m
-     velocity_translate = -velocity_translate;[m
-     if (car.rotation.y == 0) car.rotation.y = PI;[m
-     else car.rotation.y = 0;[m
-[36m@@ -101,11 +73,5 @@[m [mvoid loop() {[m
-   camera.follow(car, 350, 100, 250);[m
- 	[m
- 	//Actualización de la escena[m
-[31m-  // --- Sincronización con Core 0 ---[m
-[31m-  if (RenderTaskHandle != NULL) {[m
-[31m-    xTaskNotifyGive(RenderTaskHandle); // Dispara el render[m
-[31m-  }[m
-[31m-[m
-[31m-  // Pequeña pausa o delay de framerate para no saturar el bus[m
-[31m-  vTaskDelay(pdMS_TO_TICKS(16)); // ~60 FPS para la lógica[m
-[32m+[m[32m  renderWorld(world);[m
- }[m
-\ No newline at end of file[m
-[1mdiff --git a/render_world.cpp b/render_world.cpp[m
-[1mindex 76e6504..b0f8558 100644[m
-[1m--- a/render_world.cpp[m
-[1m+++ b/render_world.cpp[m
-[36m@@ -44,7 +44,6 @@[m [mvoid setScreen(int init_screen_time)[m
-   lcd.setColorDepth(COLOR_DEPTH);[m
- [m
-   initScreen(&canvas[0]);[m
-[31m-[m
-   delay(init_screen_time);[m
- }[m
- [m
-[36m@@ -382,118 +381,116 @@[m [mvoid renderWorld(Scene& scene)[m
- [m
- void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer)[m
- {[m
-[31m-  // 1. Ordenar los vértices por Y[m
-[32m+[m[32m  // 1. Ordenar vértices por Y[m[41m[m
-   if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }[m
-   if (p2.y > p3.y) { Point2D t = p2; p2 = p3; p3 = t; UV tuv = uv3; uv3 = uv2; uv2 = tuv; }[m
-   if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }[m
- [m
-[31m-  // 2. Calcular las pendientes de avance vertical para cada uno de los 3 lados[m
-[31m-  float dy13 = p3.y - p1.y;[m
-[31m-  float dx13 = (dy13 != 0) ? (p3.x - p1.x) / dy13 : 0;[m
-[31m-  float du13 = (dy13 != 0) ? (uv3.u - uv1.u) / dy13 : 0;[m
-[31m-  float dv13 = (dy13 != 0) ? (uv3.v - uv1.v) / dy13 : 0;[m
-[31m-[m
-[31m-  float dy12 = p2.y - p1.y;[m
-[31m-  float dx12 = (dy12 != 0) ? (p2.x - p1.x) / dy12 : 0;[m
-[31m-  float du12 = (dy12 != 0) ? (uv2.u - uv1.u) / dy12 : 0;[m
-[31m-  float dv12 = (dy12 != 0) ? (uv2.v - uv1.v) / dy12 : 0;[m
-[31m-[m
-[31m-  float dy23 = p3.y - p2.y;[m
-[31m-  float dx23 = (dy23 != 0) ? (p3.x - p2.x) / dy23 : 0;[m
-[31m-  float du23 = (dy23 != 0) ? (uv3.u - uv2.u) / dy23 : 0;[m
-[31m-  float dv23 = (dy23 != 0) ? (uv3.v - uv2.v) / dy23 : 0;[m
-[31m-[m
-[31m-  // 3. Bucle principal que recorre el triángulo de arriba a abajo (Scanline)[m
-[31m-  for (int y = p1.y; y <= p3.y; y++) {[m
-[31m-    if (y < 0) y = 0;[m
-[31m-    else if (y > WIDTH-1) break;[m
-[31m-[m
-[31m-    // Puntos de inicio (A) y fin (B) del segmento horizontal actual[m
-[31m-    float xa, ua, va;[m
-[31m-    float xb, ub, vb;[m
-[31m-[m
-[31m-    // Lado largo: Siempre va desde el vértice 1 al 3[m
-[31m-    float t13 = y - p1.y;[m
-[31m-    xa = p1.x + dx13 * t13;[m
-[31m-    ua = uv1.u + du13 * t13;[m
-[31m-    va = uv1.v + dv13 * t13;[m
-[31m-[m
-[31m-    // Lados cortos: Depende de si estamos en la mitad superior o inferior[m
-[31m-    if (y < p2.y) {[m
-[31m-      // Mitad superior: Avanzamos del vértice 1 al 2[m
-[31m-      float t12 = y - p1.y;[m
-[31m-      xb = p1.x + dx12 * t12;[m
-[31m-      ub = uv1.u + du12 * t12;[m
-[31m-      vb = uv1.v + dv12 * t12;[m
-[32m+[m[32m  // 2. Pendientes verticales en punto fijo (Q16.16)[m[41m[m
-[32m+[m[32m  int32_t dy13 = (int32_t)(p3.y - p1.y);[m[41m[m
-[32m+[m[32m  int32_t dx13 = (dy13 != 0) ? (((int32_t)(p3.x - p1.x) << 16) / dy13) : 0;[m[41m[m
-[32m+[m[32m  int32_t du13 = (dy13 != 0) ? (((int32_t)(uv3.u - uv1.u) << 16) / dy13) : 0;[m[41m[m
-[32m+[m[32m  int32_t dv13 = (dy13 != 0) ? (((int32_t)(uv3.v - uv1.v) << 16) / dy13) : 0;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m  int32_t dy12 = (int32_t)(p2.y - p1.y);[m[41m[m
-[32m+[m[32m  int32_t dx12 = (dy12 != 0) ? (((int32_t)(p2.x - p1.x) << 16) / dy12) : 0;[m[41m[m
-[32m+[m[32m  int32_t du12 = (dy12 != 0) ? (((int32_t)(uv2.u - uv1.u) << 16) / dy12) : 0;[m[41m[m
-[32m+[m[32m  int32_t dv12 = (dy12 != 0) ? (((int32_t)(uv2.v - uv1.v) << 16) / dy12) : 0;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m  int32_t dy23 = (int32_t)(p3.y - p2.y);[m[41m[m
-[32m+[m[32m  int32_t dx23 = (dy23 != 0) ? (((int32_t)(p3.x - p2.x) << 16) / dy23) : 0;[m[41m[m
-[32m+[m[32m  int32_t du23 = (dy23 != 0) ? (((int32_t)(uv3.u - uv2.u) << 16) / dy23) : 0;[m[41m[m
-[32m+[m[32m  int32_t dv23 = (dy23 != 0) ? (((int32_t)(uv3.v - uv2.v) << 16) / dy23) : 0;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m  // Recorte vertical (clipping Y)[m[41m[m
-[32m+[m[32m  int y_start = (int)p1.y;[m[41m[m
-[32m+[m[32m  int y_end = (int)p3.y;[m[41m[m
-[32m+[m[32m  if (y_start < 0) y_start = 0;[m[41m[m
-[32m+[m[32m  if (y_end >= WIDTH) y_end = WIDTH - 1;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m  // Cachear constantes de textura en registros locales[m[41m[m
-[32m+[m[32m  const uint16_t* const __restrict tex_pixels = tex.pixels;[m[41m[m
-[32m+[m[32m  const uint32_t texWidthMask = tex.width - 1;[m[41m[m
-[32m+[m[32m  const uint32_t texHeightMask = tex.height - 1;[m[41m[m
-[32m+[m[41m  [m
-[32m+[m[32m  // Calcular desplazamiento (shift) equivalente a tex.width (ej: ancho 64 -> shift 6)[m[41m[m
-[32m+[m[32m  const uint32_t texShift = __builtin_ctz(tex.width);[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m  // 3. Scanline loop[m[41m[m
-[32m+[m[32m  for (int y = y_start; y <= y_end; y++) {[m[41m[m
-[32m+[m[32m    int32_t xa, ua, va;[m[41m[m
-[32m+[m[32m    int32_t xb, ub, vb;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m    int32_t t13 = y - (int32_t)p1.y;[m[41m[m
-[32m+[m[32m    xa = ((int32_t)p1.x << 16) + dx13 * t13;[m[41m[m
-[32m+[m[32m    ua = ((int32_t)uv1.u << 16) + du13 * t13;[m[41m[m
-[32m+[m[32m    va = ((int32_t)uv1.v << 16) + dv13 * t13;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m    if (y < (int)p2.y) {[m[41m[m
-[32m+[m[32m      int32_t t12 = y - (int32_t)p1.y;[m[41m[m
-[32m+[m[32m      xb = ((int32_t)p1.x << 16) + dx12 * t12;[m[41m[m
-[32m+[m[32m      ub = ((int32_t)uv1.u << 16) + du12 * t12;[m[41m[m
-[32m+[m[32m      vb = ((int32_t)uv1.v << 16) + dv12 * t12;[m[41m[m
-     } else {[m
-[31m-      // Mitad inferior: Avanzamos del vértice 2 al 3[m
-[31m-      float t23 = y - p2.y;[m
-[31m-      xb = p2.x + dx23 * t23;[m
-[31m-      ub = uv2.u + du23 * t23;[m
-[31m-      vb = uv2.v + dv23 * t23;[m
-[32m+[m[32m      int32_t t23 = y - (int32_t)p2.y;[m[41m[m
-[32m+[m[32m      xb = ((int32_t)p2.x << 16) + dx23 * t23;[m[41m[m
-[32m+[m[32m      ub = ((int32_t)uv2.u << 16) + du23 * t23;[m[41m[m
-[32m+[m[32m      vb = ((int32_t)uv2.v << 16) + dv23 * t23;[m[41m[m
-     }[m
- [m
-[31m-    // Asegurarnos de que 'xa' sea siempre el lado izquierdo de la pantalla[m
-     if (xa > xb) {[m
-[31m-      float temp;[m
-[32m+[m[32m      int32_t temp;[m[41m[m
-       temp = xa; xa = xb; xb = temp;[m
-       temp = ua; ua = ub; ub = temp;[m
-       temp = va; va = vb; vb = temp;[m
-     }[m
- [m
-[31m-    // 4. Dibujar la línea horizontal (Segmento de textura)[m
-[31m-    float dx = xb - xa;[m
-[31m-    if (dx > 0) { // Protección contra división por cero[m
-[31m-      // Convertir a punto fijo para u, v y sus pasos[m
-[31m-      int32_t u = (int32_t)(ua * UV_SCALE);[m
-[31m-      int32_t v = (int32_t)(va * UV_SCALE);[m
-[31m-      int32_t du = (int32_t)((ub - ua) / dx * UV_SCALE);[m
-[31m-      int32_t dv = (int32_t)((vb - va) / dx * UV_SCALE);[m
-[31m-[m
-[31m-      int x_start = (int)xa;[m
-[31m-      int x_end = (int)xb;[m
-[31m-[m
-[31m-      if (x_start < 0){[m
-[31m-        int offset = -x_start; // Cuántos píxeles nos pasamos[m
-[31m-        u += du * offset;      // Adelantamos la textura matemáticamente[m
-[32m+[m[32m    int x_start = xa >> 16;[m[41m[m
-[32m+[m[32m    int x_end = xb >> 16;[m[41m[m
-[32m+[m[32m    int32_t dx = x_end - x_start;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m    if (dx > 0) {[m[41m[m
-[32m+[m[32m      int32_t du = ((ub - ua) >> (16 - UV_FRAC)) / dx;[m[41m[m
-[32m+[m[32m      int32_t dv = ((vb - va) >> (16 - UV_FRAC)) / dx;[m[41m[m
-[32m+[m[32m      int32_t u = (ua >> (16 - UV_FRAC));[m[41m[m
-[32m+[m[32m      int32_t v = (va >> (16 - UV_FRAC));[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m      if (x_start < 0) {[m[41m[m
-[32m+[m[32m        int offset = -x_start;[m[41m[m
-[32m+[m[32m        u += du * offset;[m[41m[m
-         v += dv * offset;[m
-[31m-        x_start = 0;           // Forzamos a empezar en el borde izquierdo de la pantalla[m
-[32m+[m[32m        x_start = 0;[m[41m[m
-       }[m
-[31m-      else if (x_end > HEIGHT-1){[m
-[31m-        x_end = HEIGHT-1;[m
-[32m+[m[32m      if (x_end > HEIGHT - 1) {[m[41m[m
-[32m+[m[32m        x_end = HEIGHT - 1;[m[41m[m
-       }[m
- [m
-[31m-      uint16_t texWidthMask = tex.width - 1;[m
-[31m-      uint16_t texHeightMask = tex.height - 1;[m
-[32m+[m[32m      int count = x_end - x_start + 1;[m[41m[m
-[32m+[m[32m      if (count <= 0) continue;[m[41m[m
- [m
-[31m-      for (int x = x_start; x <= x_end; x++) {[m
-[31m-        int texX = (u >> UV_FRAC) & texWidthMask;[m
-[31m-        int texY = (v >> UV_FRAC) & texHeightMask;[m
-[32m+[m[32m      // Puntero directo al píxel de inicio en el framebuffer[m[41m[m
-[32m+[m[32m      uint16_t* __restrict dst = &framebuffer[y * HEIGHT + x_start];[m[41m[m
- [m
-[31m-        // Controlar que las UV no se salgan de la textura[m
-[31m-        if (texX < 0) texX = 0;[m
-[31m-        if (texY < 0) texY = 0;[m
-[32m+[m[32m      while (count--) {[m[41m[m
-[32m+[m[32m        uint32_t texX = ((uint32_t)(u >> UV_FRAC)) & texWidthMask;[m[41m[m
-[32m+[m[32m        uint32_t texY = ((uint32_t)(v >> UV_FRAC)) & texHeightMask;[m[41m[m
- [m
-[31m-        // Leer el color de la textura mapeada[m
-[31m-        uint16_t color = tex.pixels[texY * tex.width + texX];[m
-[31m-        [m
-[31m-        // DESEMPAQUETAR los canales usando máscaras de bits[m
-[31m-        uint16_t r = (color >> 11) & 0x1F;[m
-[31m-        uint16_t g = (color >> 5) & 0x3F;[m
-[31m-        uint16_t b = color & 0x1F;[m
-[32m+[m[32m        // Acceso sin multiplicación por índice[m[41m[m
-[32m+[m[32m        uint16_t color = tex_pixels[(texY << texShift) | texX];[m[41m[m
- [m
-[31m-        // APLICAR LUZ usando operaciones enteras rápidas (Shift derecho >> 8 reemplaza la división)[m
-[32m+[m[32m        // Extracción de canales[m[41m[m
-[32m+[m[32m        uint32_t r = (color >> 11) & 0x1F;[m[41m[m
-[32m+[m[32m        uint32_t g = (color >> 5) & 0x3F;[m[41m[m
-[32m+[m[32m        uint32_t b = color & 0x1F;[m[41m[m
-[32m+[m[41m[m
-[32m+[m[32m        // Modulación de luz[m[41m[m
-         r = (r * light_intensity) >> 8;[m
-         g = (g * light_intensity) >> 8;[m
-         b = (b * light_intensity) >> 8;[m
- [m
-[31m-        // REEMPAQUETAR en un nuevo uint16_t RGB565[m
-[31m-        uint16_t lit_color = ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);[m
-[31m-[m
-[31m-        // Pintar en el lienzo virtual[m
-[31m-        framebuffer[y * HEIGHT + x] = lit_color;[m
-[32m+[m[32m        // Escritura secuencial mediante puntero con el byte-swap original[m[41m[m
-[32m+[m[32m        *dst++ = (uint16_t)(((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3));[m[41m[m
- [m
-[31m-        // Avanzar al siguiente píxel de la textura[m
-         u += du;[m
-         v += dv;[m
-       }[m

@@ -5,6 +5,7 @@
 #include "scene.h"
 #include "engine_config.h"
 #include "gfx_config.h"
+#include <esp_heap_caps.h>
 
 extern uint8_t blur;
 extern uint8_t cel_shading;
@@ -20,7 +21,7 @@ void prepareObject(Mesh& instance, Camera& camera);
 void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& camera, Point vec_norm, int faceA);
 Vertex intersectNearPlane(const Vertex& a, const Vertex& b, float nearPlane);
 void renderWorld(Scene &world);
-void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* framebuffer);
+void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* framebuffer, uint16_t depth);
 void swapTriangles(int a, int b);
 int partition(int low, int high);
 void quickSort(int low, int high);

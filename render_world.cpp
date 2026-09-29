@@ -21,6 +21,7 @@ Point light = {15.0, -1.5, -3};
 static LGFX lcd;
 LGFX_Sprite canvas[2] = { LGFX_Sprite(&lcd), LGFX_Sprite(&lcd) };
 uint8_t bufferIdx = 0;
+uint16_t *zbuffer = (uint16_t*)heap_caps_malloc(WIDTH * HEIGHT * sizeof(uint16_t), MALLOC_CAP_INTERNAL);
 
 // TRANSFORM - PROYECT
 Point rotated[MAX_VERTICES];
@@ -349,18 +350,14 @@ void renderWorld(Scene& scene)
 
   uint32_t t1 = millis();
 
-  quickSort(0, trianglesCount - 1);
-
-  uint32_t t2 = millis();
-  //canvas[bufferIdx].fillSprite(BACKGROUND); // Set backgraund color
-
   uint16_t* fb = (uint16_t*)canvas[bufferIdx].getBuffer();
   memset(fb, BACKGROUND, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
+  memset(zbuffer, 0xFF, WIDTH * HEIGHT * sizeof(uint16_t)); // Reset del zbuffer
 
   for(int i = 0; i < trianglesCount; i++){
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
-                          *renderList[i].texture, renderList[i].light_intensity, fb);
+                          *renderList[i].texture, renderList[i].light_intensity, fb, (uint16_t)renderList[i].depth);
   }
 
   // Postprocesado: Blur
@@ -425,22 +422,21 @@ void renderWorld(Scene& scene)
 
   FPSScreen(&canvas[bufferIdx]);
 
-  uint32_t t3 = millis();
+  uint32_t t2 = millis();
 
   canvas[bufferIdx].pushSprite(0,0);
 
   bufferIdx = 1 - bufferIdx;
 
-  uint32_t t4 = millis();
+  uint32_t t3 = millis();
 
   trianglesCountPerSec += trianglesCount;
 
   Serial.printf(
-    "Transform:%lu ms Sort:%lu ms Draw:%lu ms Push:%lu ms\n",
+    "Transform:%lu ms Draw:%lu ms Push:%lu ms\n",
     t1-t0,
     t2-t1,
-    t3-t2,
-    t4-t3
+    t3-t2
   );
   Serial.printf(
     "Z:%d  Back:%d  Area:%d\n",
@@ -453,7 +449,7 @@ void renderWorld(Scene& scene)
   descartadosArea = 0;
 }
 
-void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer)
+void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer, uint16_t depth)
 {
   // 1. Ordenar los vértices por Y
   if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }
@@ -540,6 +536,11 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
       uint16_t texHeightMask = tex.height - 1;
 
       for (int x = x_start; x <= x_end; x++) {
+        
+        if (depth > zbuffer[y * HEIGHT + x]){ // Z-BUFFER 
+          continue;
+        }
+
         int texX = (u >> UV_FRAC) & texWidthMask;
         int texY = (v >> UV_FRAC) & texHeightMask;
 
@@ -565,6 +566,7 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
 
         // Pintar en el lienzo virtual
         framebuffer[y * HEIGHT + x] = lit_color;
+        zbuffer[y * HEIGHT + x] = depth;
 
         // Avanzar al siguiente píxel de la textura
         u += du;
