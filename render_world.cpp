@@ -317,7 +317,14 @@ void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& ca
       renderList[trianglesCount].texture = &texture;
 
       renderList[trianglesCount].light_intensity = faceIntensity(vec_norm);
-      renderList[trianglesCount].depth = (v1.position.z + v2.position.z + v3.position.z)*0.33;
+
+      // En cada vértice se debe guardar para el calculo del z-buffer
+      renderList[trianglesCount].w[0] = 1.0f / v1.position.z;
+      renderList[trianglesCount].w[1] = 1.0f / v2.position.z;
+      renderList[trianglesCount].w[2] = 1.0f / v3.position.z;
+      //renderList[trianglesCount].w[0] = v1.position.z;
+      //renderList[trianglesCount].w[1] = v2.position.z;
+      //renderList[trianglesCount].w[2] = v3.position.z;
 
       trianglesCount++;
   }
@@ -352,12 +359,12 @@ void renderWorld(Scene& scene)
 
   uint16_t* fb = (uint16_t*)canvas[bufferIdx].getBuffer();
   memset(fb, BACKGROUND, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
-  memset(zbuffer, 0xFF, WIDTH * HEIGHT * sizeof(uint16_t)); // Reset del zbuffer
+  memset(zbuffer, 0x0000, WIDTH * HEIGHT * sizeof(uint16_t)); // Reset del zbuffer
 
   for(int i = 0; i < trianglesCount; i++){
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
-                          *renderList[i].texture, renderList[i].light_intensity, fb, (uint16_t)renderList[i].depth);
+                          *renderList[i].texture, renderList[i].light_intensity, fb, renderList[i].w);
   }
 
   // Postprocesado: Blur
@@ -449,12 +456,12 @@ void renderWorld(Scene& scene)
   descartadosArea = 0;
 }
 
-void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer, uint16_t depth)
-{
+void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer, float w[3])
+{ 
   // 1. Ordenar los vértices por Y
-  if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }
-  if (p2.y > p3.y) { Point2D t = p2; p2 = p3; p3 = t; UV tuv = uv3; uv3 = uv2; uv2 = tuv; }
-  if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; }
+  if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; float tw = w[0]; w[0] = w[1]; w[1] = tw; }
+  if (p2.y > p3.y) { Point2D t = p2; p2 = p3; p3 = t; UV tuv = uv3; uv3 = uv2; uv2 = tuv; float tw = w[1]; w[1] = w[2]; w[2] = tw; }
+  if (p1.y > p2.y) { Point2D t = p1; p1 = p2; p2 = t; UV tuv = uv1; uv1 = uv2; uv2 = tuv; float tw = w[0]; w[0] = w[1]; w[1] = tw; }
 
   // 2. Calcular las pendientes de avance vertical para cada uno de los 3 lados
   float dy13 = p3.y - p1.y;
@@ -471,6 +478,13 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
   float dx23 = (dy23 != 0) ? (p3.x - p2.x) / dy23 : 0;
   float du23 = (dy23 != 0) ? (uv3.u - uv2.u) / dy23 : 0;
   float dv23 = (dy23 != 0) ? (uv3.v - uv2.v) / dy23 : 0;
+
+  // Para el z-buffer
+  float x0 = p1.x, y0 = p1.y;
+  float x1 = p2.x, y1 = p2.y;
+  float x2 = p3.x, y2 = p3.y;
+
+  float denom = (y1 - y2)*(x0 - x2) + (x2 - x1)*(y0 - y2);
 
   // 3. Bucle principal que recorre el triángulo de arriba a abajo (Scanline)
   for (int y = p1.y; y <= p3.y; y++) {
@@ -536,10 +550,16 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
       uint16_t texHeightMask = tex.height - 1;
 
       for (int x = x_start; x <= x_end; x++) {
+        float alpha = ((y1 - y2)*(x - x2) + (x2 - x1)*(y - y2)) / denom;
+        float beta  = ((y2 - y0)*(x - x2) + (x0 - x2)*(y - y2)) / denom;
+        float gamma = 1.0f - alpha - beta;
+
+        // Dentro del bucle de cada píxel:
+        float inv_w = alpha * w[0] + beta * w[1] + gamma * w[2];
+
+        uint16_t depth = (uint16_t)(inv_w * 8191.0f);
         
-        if (depth > zbuffer[y * HEIGHT + x]){ // Z-BUFFER 
-          continue;
-        }
+        if (depth < zbuffer[y * HEIGHT + x]) continue;
 
         int texX = (u >> UV_FRAC) & texWidthMask;
         int texY = (v >> UV_FRAC) & texHeightMask;
@@ -574,44 +594,6 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
       }
     }
   }
-}
-
-void swapTriangles(int a, int b)
-{
-    RenderTriangle temp = renderList[a];
-    renderList[a] = renderList[b];
-    renderList[b] = temp;
-}
-
-int partition(int low, int high)
-{
-    float pivot = renderList[high].depth;
-
-    int i = low - 1;
-
-    for(int j = low; j < high; j++)
-    {
-        if(renderList[j].depth > pivot)
-        {
-            i++;
-            swapTriangles(i, j);
-        }
-    }
-
-    swapTriangles(i + 1, high);
-
-    return i + 1;
-}
-
-void quickSort(int low, int high)
-{
-    if(low < high)
-    {
-        int pi = partition(low, high);
-
-        quickSort(low, pi - 1);
-        quickSort(pi + 1, high);
-    }
 }
 
 Point normalVector(int a, int b, int c)

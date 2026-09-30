@@ -71,7 +71,7 @@ struct RenderTriangle
     UV uv2;
     UV uv3;
 
-    float depth;
+    float w[3];
     
     Texture* texture;
 
