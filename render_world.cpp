@@ -201,7 +201,7 @@ void prepareObject(Mesh& instance, Camera& camera)
            C
       Buscamos ordenar tal que C < Near Plane y A > B > Near Plane */
       if (v1.position.z < v2.position.z){
-        Vertex aux = v1;
+        Vertex aux = v2;
         v2 = v1;
         v1 = aux;
       }
@@ -213,7 +213,7 @@ void prepareObject(Mesh& instance, Camera& camera)
       }
       
       if (v1.position.z < v2.position.z){
-        Vertex aux = v1;
+        Vertex aux = v2;
         v2 = v1;
         v1 = aux;
       }
@@ -247,7 +247,7 @@ void prepareObject(Mesh& instance, Camera& camera)
       
       Buscamos ordenar tal que C > Near Plane y A < B < Near Plane */
       if (v1.position.z > v2.position.z){
-        Vertex aux = v1;
+        Vertex aux = v2;
         v2 = v1;
         v1 = aux;
       }
@@ -322,9 +322,6 @@ void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& ca
       renderList[trianglesCount].w[0] = 1.0f / v1.position.z;
       renderList[trianglesCount].w[1] = 1.0f / v2.position.z;
       renderList[trianglesCount].w[2] = 1.0f / v3.position.z;
-      //renderList[trianglesCount].w[0] = v1.position.z;
-      //renderList[trianglesCount].w[1] = v2.position.z;
-      //renderList[trianglesCount].w[2] = v3.position.z;
 
       trianglesCount++;
   }
@@ -484,7 +481,21 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
   float x1 = p2.x, y1 = p2.y;
   float x2 = p3.x, y2 = p3.y;
 
+  float alphaY12 = (y1 - y2);
+  float alphaX21 = (x2 - x1);
+  float betaY20  = (y2 - y0);
+  float betaX02  = (x0 - x2);
+
+  float u_over_w0 = uv1.u * w[0];
+  float u_over_w1 = uv2.u * w[1];
+  float u_over_w2 = uv3.u * w[2];
+
+  float v_over_w0 = uv1.v * w[0];
+  float v_over_w1 = uv2.v * w[1];
+  float v_over_w2 = uv3.v * w[2];
+
   float denom = (y1 - y2)*(x0 - x2) + (x2 - x1)*(y0 - y2);
+  denom = 1.0f / denom;
 
   // 3. Bucle principal que recorre el triángulo de arriba a abajo (Scanline)
   for (int y = p1.y; y <= p3.y; y++) {
@@ -550,19 +561,32 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
       uint16_t texHeightMask = tex.height - 1;
 
       for (int x = x_start; x <= x_end; x++) {
-        float alpha = ((y1 - y2)*(x - x2) + (x2 - x1)*(y - y2)) / denom;
-        float beta  = ((y2 - y0)*(x - x2) + (x0 - x2)*(y - y2)) / denom;
+        float alpha = (alphaY12*(x - x2) + alphaX21*(y - y2)) * denom;
+        float beta  = (betaY20*(x - x2) + betaX02*(y - y2)) * denom;
         float gamma = 1.0f - alpha - beta;
 
-        // Dentro del bucle de cada píxel:
+        // Para saber si dibujar o no el pixel
         float inv_w = alpha * w[0] + beta * w[1] + gamma * w[2];
 
         uint16_t depth = (uint16_t)(inv_w * 8191.0f);
         
         if (depth < zbuffer[y * HEIGHT + x]) continue;
 
-        int texX = (u >> UV_FRAC) & texWidthMask;
-        int texY = (v >> UV_FRAC) & texHeightMask;
+        // Corrección de perspectiva
+        float u_over_w  = alpha * u_over_w0  + beta * u_over_w1  + gamma * u_over_w2;
+        float v_over_w  = alpha * v_over_w0  + beta * v_over_w1  + gamma * v_over_w2;
+
+        // Recuperar u y v correctos
+        float inv_wt = 1.0f / inv_w;
+        float u_persp = u_over_w * inv_wt;
+        float v_persp = v_over_w * inv_wt;
+
+        // Usar u_persp y v_persp para la textura
+        int32_t u_f = (int32_t)(u_persp * UV_SCALE);
+        int32_t v_f = (int32_t)(v_persp * UV_SCALE);
+
+        int texX = (u_f >> UV_FRAC) & texWidthMask;
+        int texY = (v_f >> UV_FRAC) & texHeightMask;
 
         // Controlar que las UV no se salgan de la textura
         if (texX < 0) texX = 0;
