@@ -7,11 +7,6 @@
 #include "gfx_config.h"
 #include <esp_heap_caps.h>
 
-extern uint8_t blur;
-extern uint8_t cel_shading;
-extern uint8_t antialias;
-extern uint8_t bloom;
-
 void update(Scene &world);
 void setScreen(int init_screen_time);
 void initScreen(LGFX_Sprite *canvas);

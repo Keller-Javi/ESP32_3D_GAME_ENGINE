@@ -1,13 +1,7 @@
 #include "render_world.h"
-#include "post_processing.h"
 
 #define UV_FRAC 8
 #define UV_SCALE (1 << UV_FRAC)
-
-uint8_t blur = 0;
-uint8_t cel_shading = 0;
-uint8_t antialias = 0;
-uint8_t bloom = 0;
 
 // Handle para la tarea de renderizado
 TaskHandle_t RenderTaskHandle = NULL;
@@ -54,8 +48,6 @@ void setScreen(int init_screen_time)
   lcd.setColorDepth(COLOR_DEPTH);
 
   initScreen(&canvas[0]);
-
-  initPostProcessBuffers(HEIGHT, WIDTH);
 
   initTasks();
 
@@ -362,66 +354,6 @@ void renderWorld(Scene& scene)
     drawTexturedTriangle(renderList[i].p1,renderList[i].p2,renderList[i].p3,
                           renderList[i].uv1, renderList[i].uv2, renderList[i].uv3,
                           *renderList[i].texture, renderList[i].light_intensity, fb, renderList[i].w);
-  }
-
-  // Postprocesado: Blur
-  switch(blur){
-    case 1: {
-      uint32_t t = millis();
-      applyBlur_Average(fb, HEIGHT, WIDTH);
-      Serial.printf("Blur (Average): %lu ms\n", millis() - t);
-      break;
-    }
-    case 2: {
-      uint32_t t = millis();
-      applyBlur_Gaussian(fb, HEIGHT, WIDTH);
-      Serial.printf("Blur (Gaussian): %lu ms\n", millis() - t);
-      break;
-    }
-    default:
-      break;
-  }
-
-  // Postprocesado: Antialiasing
-  switch(antialias){
-    case 1: {
-      uint32_t t = millis();
-      applyAntialiassing_Sobel(fb, HEIGHT, WIDTH, 45);
-      Serial.printf("Antialias (Sobel): %lu ms\n", millis() - t);
-      break;
-    }
-    case 2: {
-      uint32_t t = millis();
-      applyAntialiassing_Laplacian(fb, HEIGHT, WIDTH, 5);
-      Serial.printf("Antialias (Laplacian): %lu ms\n", millis() - t);
-      break;
-    }
-    case 3: {
-      uint32_t t = millis();
-      applyAntialiassing_SobelMedian(fb, HEIGHT, WIDTH, 45);
-      Serial.printf("Antialias (Laplacian): %lu ms\n", millis() - t);
-      break;
-    }
-    default:
-      break;
-  }
-
-  // Postprocesado: Cel-Shading
-  switch(cel_shading){
-    case 1: {
-      uint32_t t = millis();
-      applyCelShading_Sobel(fb, HEIGHT, WIDTH, 25);
-      Serial.printf("Cel-shading (Sobel): %lu ms\n", millis() - t);
-      break;
-    }
-    case 2: {
-      uint32_t t = millis();
-      applyCelShading_Laplacian(fb, HEIGHT, WIDTH, 20);
-      Serial.printf("Cel-shading (Laplacian): %lu ms\n", millis() - t);
-      break;
-    }
-    default:
-      break;
   }
 
   FPSScreen(&canvas[bufferIdx]);

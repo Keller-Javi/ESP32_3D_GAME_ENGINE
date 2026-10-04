@@ -2,21 +2,11 @@
 #include "assets.h"
 #include "terrain.h"
 
-#define BTN_BLUR 15
-#define BTN_CEL_SHADING 16
-#define BTN_ANTIALIAS 17
-#define BTN_BLOOM 18
-
 #define PI 3.14
 
 Scene world;
 Camera camera;
 Terrain terrain;
-
-bool lastAntialiasButton = HIGH;
-bool lastCelButton       = HIGH;
-bool lastBloomButton     = HIGH;
-bool lastBlurButton      = HIGH;
 
 // Movement
 float velocity_translate = 4.0;
@@ -26,11 +16,6 @@ Mesh car2;
 
 void setup(void) {
   Serial.begin(115200);
-
-  pinMode(BTN_ANTIALIAS, INPUT_PULLUP);
-  pinMode(BTN_CEL_SHADING, INPUT_PULLUP);
-  pinMode(BTN_BLOOM, INPUT_PULLUP);
-  pinMode(BTN_BLUR, INPUT_PULLUP);
 
   setScreen(1500);
   
@@ -76,45 +61,6 @@ void setup(void) {
 
 
 void loop() {
-  // =========================
-  // Botones de configuración
-  // =========================
-
-  bool antialiasButton = digitalRead(BTN_ANTIALIAS);
-  bool celButton       = digitalRead(BTN_CEL_SHADING);
-  bool bloomButton     = digitalRead(BTN_BLOOM);
-  bool blurButton     = digitalRead(BTN_BLUR);
-
-  // Detectar nueva pulsación
-  if (lastAntialiasButton == HIGH && antialiasButton == LOW) {
-    antialias++;
-
-    if (antialias == 4) antialias = 0;
-  }
-
-  if (lastCelButton == HIGH && celButton == LOW) {
-    cel_shading++;
-
-    if (cel_shading == 3) cel_shading = 0;
-  }
-
-  if (lastBloomButton == HIGH && bloomButton == LOW) {
-    bloom++;
-
-    if (bloom == 3) bloom = 0;
-  }
-
-  if (lastBlurButton == HIGH && blurButton == LOW) {
-    blur++;
-
-    if (blur == 3) blur = 0;
-  }
-
-  lastAntialiasButton = antialiasButton;
-  lastCelButton       = celButton;
-  lastBloomButton     = bloomButton;
-  lastBlurButton      = blurButton;
-
   // =====================================================
   // LÓGICA DEL JUEGO
   // =====================================================
