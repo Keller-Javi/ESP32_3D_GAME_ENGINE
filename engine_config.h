@@ -10,10 +10,15 @@
 #define COLOR_DEPTH       16  // Don't change this, because I work with pointers of 16 bits.
 
 // SCENE
-#define BACKGROUND        0xb73d
+#define BACKGROUND        0x0C63 // Swap the bytes: 0x630C becomes 0x0C63 for correct color rendering.
 #define MINIMUM_BRIGHTNESS  0.4
 #define MAX_VERTICES      500
 #define MAX_TRIANGLES     1000
 #define MAX_OBJECTS       5
+#define NEAR_PLANE        1.0f
+#define FAR_PLANE         750.0f
+#define FOG_COLOR         0x0C63 // Swap the bytes: 0x630C becomes 0x0C63 for correct color rendering.
+#define FOG_START         200.0f
+#define FOG_END           750.0f
 
 #endif

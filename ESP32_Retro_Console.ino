@@ -37,7 +37,7 @@ void setup(void) {
   car.numFaces = sizeof(car_faces)/sizeof(car_faces[0]);
   car.position = {100, 100, 300};
   car.rotation = {PI, PI, 0};
-  car.texture = {128, 128, car4};
+  car.texture = {128, 128, 7, car4};
 
   car2.vertices = car_vertices;
   car2.faces = car_faces;
@@ -47,10 +47,10 @@ void setup(void) {
   car2.numFaces = sizeof(car_faces)/sizeof(car_faces[0]);
   car2.position = {-100, 100, -150};
   car2.rotation = {PI, PI, 0};
-  car2.texture = {128, 128, car4};
+  car2.texture = {128, 128, 7, car4};
 
-  terrain.mesh.texture = {128,128,grass};
-  terrain.create(5, 5, 750);
+  terrain.mesh.texture = {128,128, 7, grass};
+  terrain.create(15, 15, 750);
   terrain.mesh.position = {500,125,250};
 
   world.numObjects = 0;
@@ -64,7 +64,7 @@ void loop() {
   // =====================================================
   // LÓGICA DEL JUEGO
   // =====================================================
-  if ((car.position.z < -800) || (car.position.z > 700)){
+  if ((car.position.z < -2250) || (car.position.z > 1250)){
     velocity_translate = -velocity_translate;
     if (car.rotation.y == 0) car.rotation.y = PI;
     else car.rotation.y = 0;

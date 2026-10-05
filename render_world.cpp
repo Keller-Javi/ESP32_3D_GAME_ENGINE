@@ -20,7 +20,9 @@ uint16_t *zbuffer = (uint16_t*)heap_caps_malloc(WIDTH * HEIGHT * sizeof(uint16_t
 // TRANSFORM - PROYECT
 Point rotated[MAX_VERTICES];
 RenderTriangle renderList[MAX_TRIANGLES];
-float near = 1.0f;
+float near = NEAR_PLANE;
+float far  = FAR_PLANE;
+uint16_t fog_color = (FOG_COLOR >> 8) | (FOG_COLOR << 8);
 
 int trianglesCount = 0;
 
@@ -32,7 +34,9 @@ int visibleTriangles = 0;
 int trianglesCountPerSec = 0;
 
 int descartadosZ = 0;
+int descartadosZFar = 0;
 int descartadosBackface = 0;
+int descartadosSSFrustumCulling = 0;
 int descartadosArea = 0;
 
 void setScreen(int init_screen_time)
@@ -175,112 +179,129 @@ void prepareObject(Mesh& instance, Camera& camera)
     v2.uv = instance.texcoords[instance.faces_texcoords[i].b];
     v3.uv = instance.texcoords[instance.faces_texcoords[i].c];
 
-    if(v1.position.z < 1) cont++;
-    if(v2.position.z < 1) cont++;
-    if(v3.position.z < 1) cont++;
+    if(v1.position.z < near) cont++;
+    if(v2.position.z < near) cont++;
+    if(v3.position.z < near) cont++;
 
     if(cont == 3) {descartadosZ++; continue;} // los tres vertices fuera de la camara
-    else if(cont == 1) { // Un solo vertice fuera de la camara
-      // Primero ordenamos A < B < C
-      /*   A
-          /|
-         / |
-        /  |
-       B   |
-       \   |
-      --P--Q--- Near Plane --> Z = 1
-         \ |
-           C
-      Buscamos ordenar tal que C < Near Plane y A > B > Near Plane */
-      if (v1.position.z < v2.position.z){
+
+    // Back-face culling:
+    Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
+    if (!faceVisible(instance.faces[i].a, vec_norm)) {descartadosBackface++; continue;}
+
+    // Primero ordenamos V1 < V2 < V3
+    if (v1.position.z > v2.position.z) {
         Vertex aux = v2;
         v2 = v1;
         v1 = aux;
-      }
-      
-      if (v2.position.z < v3.position.z){
+    }
+
+    if (v2.position.z > v3.position.z) {
         Vertex aux = v2;
         v2 = v3;
         v3 = aux;
-      }
-      
-      if (v1.position.z < v2.position.z){
+    }
+
+    if (v1.position.z > v2.position.z) {
         Vertex aux = v2;
         v2 = v1;
         v1 = aux;
-      }
-
-      // Calculamos la intersección con el Near Plane
-      Vertex P = intersectNearPlane(v1, v3, near);
-      Vertex Q = intersectNearPlane(v2, v3, near);
-      /*Acá tenemos:
-           A
+    }
+    
+    if(cont == 1) { // Un solo vertice fuera de la camara
+      /*  V3
           /|
          / |
         /  |
-       B   |
+      V2   |
        \   |
-        P--Q
-      Un triangulo se forma entre A, P y B
-      Y el otro entre P, Q y B*/
+      --P--Q--- Near Plane --> Z = 1
+         \ |
+          V1*/
 
-      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
-      proyectObject(v1, P, v2, instance.texture, camera, vec_norm, instance.faces[i].a);
-      proyectObject(P, Q, v2, instance.texture, camera, vec_norm, instance.faces[i].a);
+      // Calculamos la intersección con el Near Plane
+      Vertex P = intersectPlane(v1, v3, near);
+      Vertex Q = intersectPlane(v1, v2, near);
+      /*Acá tenemos:
+           V3
+          /|
+         / |
+        /  |
+      V2   |
+       \   |
+        Q--P
+      Un triangulo se forma entre V3, P y Q
+      Y el otro entre P, Q y V2 */
+      
+      proyectObject(P, v2, v3, instance.texture, camera, vec_norm);
+      proyectObject(P, Q, v2, instance.texture, camera, vec_norm);
     }
     else if(cont == 2) { // Dos vertices fuera de la camara
-      // Primero ordenamos A < B < C
-      /*   C
+      /*  V3
           /\
          /  \
       --P----Q--- Near Plane --> Z = 1
        /      \
-      A--------B
-      
-      Buscamos ordenar tal que C > Near Plane y A < B < Near Plane */
-      if (v1.position.z > v2.position.z){
-        Vertex aux = v2;
-        v2 = v1;
-        v1 = aux;
-      }
-      
-      if (v2.position.z > v3.position.z){
-        Vertex aux = v2;
-        v2 = v3;
-        v3 = aux;
-      }
-      
-      if (v1.position.z > v2.position.z){
-        Vertex aux = v2;
-        v2 = v1;
-        v1 = aux;
-      }
+      V1-------V2 */
 
       // Calculamos la intersección con el Near Plane
-      Vertex P = intersectNearPlane(v3, v1, near);
-      Vertex Q = intersectNearPlane(v3, v2, near);
+      Vertex P = intersectPlane(v1, v3, near);
+      Vertex Q = intersectPlane(v2, v3, near);
 
-      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
-      proyectObject(v3, P, Q, instance.texture, camera, vec_norm, instance.faces[i].a);
+      proyectObject(v3, P, Q, instance.texture, camera, vec_norm);
     }
     else{
       // Si el trangulo está en la camara
-      Point vec_norm = normalVector(instance.faces[i].a, instance.faces[i].b, instance.faces[i].c);
-      proyectObject(v1, v2, v3, instance.texture, camera, vec_norm, instance.faces[i].a);
+      // ====================== FAR PLANE CLIPPING ======================
+      int contFar = 0;
+      if (v1.position.z > far) contFar++;
+      if (v2.position.z > far) contFar++;
+      if (v3.position.z > far) contFar++;
+
+      if (contFar == 3) {
+          // Los tres vértices están más allá del far plane
+          descartadosZFar++;
+          continue;
+      }
+
+      if (contFar == 1) {
+          // Un vértice fuera (el más lejano), dos dentro
+
+          // Ahora v3 está fuera, v1 y v2 están dentro
+          Vertex P = intersectPlane(v1, v3, far);
+          Vertex Q = intersectPlane(v2, v3, far);
+
+          // Generamos dos triángulos
+          proyectObject(v1, v2, P, instance.texture, camera, vec_norm);
+          proyectObject(v2, Q, P, instance.texture, camera, vec_norm);
+      }
+      else if (contFar == 2) {
+          // Dos vértices fuera, uno dentro
+
+          // Ahora v1 está dentro, v2 y v3 están fuera
+          Vertex P = intersectPlane(v1, v3, far);
+          Vertex Q = intersectPlane(v1, v2, far);
+
+          // Generamos un solo triángulo
+          proyectObject(v1, P, Q, instance.texture, camera, vec_norm);
+      }
+      else {
+          // Ningún vértice fuera del far plane → triángulo normal
+          proyectObject(v1, v2, v3, instance.texture, camera, vec_norm);
+      }
     }
   }
 }
 
-Vertex intersectNearPlane(const Vertex& a, const Vertex& b, float nearPlane)
+Vertex intersectPlane(const Vertex& a, const Vertex& b, float plane)
 {
-    float t = (nearPlane - a.position.z) /
-              (b.position.z - a.position.z);
+    float t = (plane - a.position.z) / (b.position.z - a.position.z);
 
     Vertex r;
 
     r.position.x = a.position.x + (b.position.x - a.position.x) * t;
     r.position.y = a.position.y + (b.position.y - a.position.y) * t;
-    r.position.z = nearPlane;
+    r.position.z = plane;
 
     r.uv.u = a.uv.u + (b.uv.u - a.uv.u) * t;
     r.uv.v = a.uv.v + (b.uv.v - a.uv.v) * t;
@@ -288,36 +309,45 @@ Vertex intersectNearPlane(const Vertex& a, const Vertex& b, float nearPlane)
     return r;
 }
 
-void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& camera, Point vec_norm, int faceA){
-  if (faceVisible(faceA, vec_norm)){
-      Point2D p1 = {(v1.position.x * camera.fov) / v1.position.z + CENTER_X, (v1.position.y  * camera.fov) / v1.position.z + CENTER_Y};
-      Point2D p2 = {(v2.position.x * camera.fov) / v2.position.z + CENTER_X, (v2.position.y  * camera.fov) / v2.position.z + CENTER_Y};
-      Point2D p3 = {(v3.position.x * camera.fov) / v3.position.z + CENTER_X, (v3.position.y  * camera.fov) / v3.position.z + CENTER_Y};
-      
-      int area = (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y);
+void proyectObject(Vertex v1, Vertex v2, Vertex v3, Texture &texture, Camera& camera, Point vec_norm){
+  Point2D p1 = {(v1.position.x * camera.fov) / v1.position.z + CENTER_X, (v1.position.y  * camera.fov) / v1.position.z + CENTER_Y};
+  Point2D p2 = {(v2.position.x * camera.fov) / v2.position.z + CENTER_X, (v2.position.y  * camera.fov) / v2.position.z + CENTER_Y};
+  Point2D p3 = {(v3.position.x * camera.fov) / v3.position.z + CENTER_X, (v3.position.y  * camera.fov) / v3.position.z + CENTER_Y};
+  
+  // Hay triangulos planos que hay que ignorarlos ya que no se ven practicamente y se pierde potencia de computo el querer dibujarlos
+  int area = (p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y);
+  if (area == 0) {descartadosArea++ ; return;}
 
-      if (area == 0) {descartadosArea++ ; return;}   // Hay triangulos planos que hay que ignorarlos ya que no se ven practicamente y se pierde potencia de computo el querer dibujarlos
+  // Screen-space frustum culling (trivial reject)
+  bool all_left   = (p1.x < 0 && p2.x < 0 && p3.x < 0);
+  bool all_right  = (p1.x >= HEIGHT && p2.x >= HEIGHT && p3.x >= HEIGHT); // bool all_right  = (p1.x >= WIDTH && p2.x >= WIDTH && p3.x >= WIDTH);
+  bool all_top    = (p1.y < 0 && p2.y < 0 && p3.y < 0);
+  bool all_bottom = (p1.y >= WIDTH && p2.y >= WIDTH && p3.y >= WIDTH); // bool all_bottom = (p1.y >= HEIGHT && p2.y >= HEIGHT && p3.y >= HEIGHT);
 
-      renderList[trianglesCount].p1 = p1;
-      renderList[trianglesCount].p2 = p2;
-      renderList[trianglesCount].p3 = p3;
-
-      renderList[trianglesCount].uv1 = v1.uv;
-      renderList[trianglesCount].uv2 = v2.uv;
-      renderList[trianglesCount].uv3 = v3.uv;
-
-      renderList[trianglesCount].texture = &texture;
-
-      renderList[trianglesCount].light_intensity = faceIntensity(vec_norm);
-
-      // En cada vértice se debe guardar para el calculo del z-buffer
-      renderList[trianglesCount].w[0] = 1.0f / v1.position.z;
-      renderList[trianglesCount].w[1] = 1.0f / v2.position.z;
-      renderList[trianglesCount].w[2] = 1.0f / v3.position.z;
-
-      trianglesCount++;
+  if (all_left || all_right || all_top || all_bottom) {
+      // Triángulo completamente fuera de la pantalla
+      descartadosSSFrustumCulling++;
+      return;
   }
-  else {descartadosBackface++;}
+
+  renderList[trianglesCount].p1 = p1;
+  renderList[trianglesCount].p2 = p2;
+  renderList[trianglesCount].p3 = p3;
+
+  renderList[trianglesCount].uv1 = v1.uv;
+  renderList[trianglesCount].uv2 = v2.uv;
+  renderList[trianglesCount].uv3 = v3.uv;
+
+  renderList[trianglesCount].texture = &texture;
+
+  renderList[trianglesCount].light_intensity = faceIntensity(vec_norm);
+
+  // En cada vértice se debe guardar para el calculo del z-buffer
+  renderList[trianglesCount].w[0] = 1.0f / v1.position.z;
+  renderList[trianglesCount].w[1] = 1.0f / v2.position.z;
+  renderList[trianglesCount].w[2] = 1.0f / v3.position.z;
+
+  trianglesCount++;
 }
 
 void renderWorld(Scene& scene)
@@ -347,7 +377,10 @@ void renderWorld(Scene& scene)
   uint32_t t1 = millis();
 
   uint16_t* fb = (uint16_t*)canvas[bufferIdx].getBuffer();
-  memset(fb, BACKGROUND, WIDTH * HEIGHT * sizeof(uint16_t)); // negro
+
+  for (size_t i = 0; i < WIDTH * HEIGHT; ++i) {
+    fb[i] = BACKGROUND;
+  }
   memset(zbuffer, 0x0000, WIDTH * HEIGHT * sizeof(uint16_t)); // Reset del zbuffer
 
   for(int i = 0; i < trianglesCount; i++){
@@ -375,14 +408,18 @@ void renderWorld(Scene& scene)
     t3-t2
   );
   Serial.printf(
-    "Z:%d  Back:%d  Area:%d\n",
+    "Z:%d  Z-Far:%d  Back:%d  Area:%d  Frustum:%d\n",
     descartadosZ,
+    descartadosZFar,
     descartadosBackface,
-    descartadosArea
+    descartadosArea,
+    descartadosSSFrustumCulling
   );
   descartadosZ = 0;
+  descartadosZFar = 0;
   descartadosBackface = 0;
   descartadosArea = 0;
+  descartadosSSFrustumCulling = 0;
 }
 
 void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV uv3, const Texture& tex, uint16_t light_intensity, uint16_t* __restrict framebuffer, float w[3])
@@ -426,8 +463,24 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
   float v_over_w1 = uv2.v * w[1];
   float v_over_w2 = uv3.v * w[2];
 
+  // Variables y calculos auxiliares
+  float alpha, beta, gamma;
+  float u_over_w, v_over_w;
+
+  uint16_t texWidthMask = tex.width - 1;
+  uint16_t texHeightMask = tex.height - 1;
+  float inv_w, z;
+  uint16_t depth;
+
   float denom = (y1 - y2)*(x0 - x2) + (x2 - x1)*(y0 - y2);
   denom = 1.0f / denom;
+
+  float fog_prop = (FOG_END - FOG_START);
+  fog_prop = 1.0f / fog_prop;
+
+  uint16_t fr = (fog_color >> 11) & 0x1F;
+  uint16_t fg = (fog_color >> 5)  & 0x3F;
+  uint16_t fb =  fog_color        & 0x1F;
 
   // 3. Bucle principal que recorre el triángulo de arriba a abajo (Scanline)
   for (int y = p1.y; y <= p3.y; y++) {
@@ -489,64 +542,82 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
         x_end = HEIGHT-1;
       }
 
-      uint16_t texWidthMask = tex.width - 1;
-      uint16_t texHeightMask = tex.height - 1;
+      alpha = (alphaY12*(x_start - x2) + alphaX21*(y - y2)) * denom;
+      beta = (betaY20*(x_start - x2) + betaX02*(y - y2)) * denom;
+      gamma = 1.0f - alpha - beta;
+      inv_w = alpha * w[0] + beta * w[1] + gamma * w[2];
+      u_over_w  = alpha * u_over_w0  + beta * u_over_w1  + gamma * u_over_w2;
+      v_over_w  = alpha * v_over_w0  + beta * v_over_w1  + gamma * v_over_w2;
+      float dAlphaDx = (y1 - y2) * denom;
+      float dBetaDx  = (y2 - y0) * denom;
+      float dGammaDx = -dAlphaDx - dBetaDx;
+      float dInvW = dAlphaDx * w[0] + dBetaDx  * w[1] + dGammaDx * w[2];
+      float dUOW = dAlphaDx * u_over_w0 + dBetaDx  * u_over_w1 + dGammaDx * u_over_w2;
+      float dVOW =dAlphaDx * v_over_w0 + dBetaDx  * v_over_w1 + dGammaDx * v_over_w2;
 
       for (int x = x_start; x <= x_end; x++) {
-        float alpha = (alphaY12*(x - x2) + alphaX21*(y - y2)) * denom;
-        float beta  = (betaY20*(x - x2) + betaX02*(y - y2)) * denom;
-        float gamma = 1.0f - alpha - beta;
-
         // Para saber si dibujar o no el pixel
-        float inv_w = alpha * w[0] + beta * w[1] + gamma * w[2];
-
-        uint16_t depth = (uint16_t)(inv_w * 8191.0f);
+        depth = (uint16_t)(inv_w * 8191.0f);
         
-        if (depth < zbuffer[y * HEIGHT + x]) continue;
+        if (depth >= zbuffer[y * HEIGHT + x]){
+          z = 1.0f / inv_w;
 
-        // Corrección de perspectiva
-        float u_over_w  = alpha * u_over_w0  + beta * u_over_w1  + gamma * u_over_w2;
-        float v_over_w  = alpha * v_over_w0  + beta * v_over_w1  + gamma * v_over_w2;
+          float fogFactor = ((FOG_END - z) * fog_prop);
+          
+          if (fogFactor < 0.0f) fogFactor = 0.0f;
+          if (fogFactor > 1.0f) fogFactor = 1.0f;
+          
+          uint16_t fog = (uint16_t)(fogFactor * 255.0f);
 
-        // Recuperar u y v correctos
-        float inv_wt = 1.0f / inv_w;
-        float u_persp = u_over_w * inv_wt;
-        float v_persp = v_over_w * inv_wt;
+          // Recuperar u y v correctos
+          float u_persp = u_over_w * z;
+          float v_persp = v_over_w * z;
 
-        // Usar u_persp y v_persp para la textura
-        int32_t u_f = (int32_t)(u_persp * UV_SCALE);
-        int32_t v_f = (int32_t)(v_persp * UV_SCALE);
+          // Usar u_persp y v_persp para la textura
+          int32_t u_f = (int32_t)(u_persp * UV_SCALE);
+          int32_t v_f = (int32_t)(v_persp * UV_SCALE);
 
-        int texX = (u_f >> UV_FRAC) & texWidthMask;
-        int texY = (v_f >> UV_FRAC) & texHeightMask;
+          int texX = (u_f >> UV_FRAC) & texWidthMask;
+          int texY = (v_f >> UV_FRAC) & texHeightMask;
 
-        // Controlar que las UV no se salgan de la textura
-        if (texX < 0) texX = 0;
-        if (texY < 0) texY = 0;
+          // Leer el color de la textura mapeada
+          uint16_t color = tex.pixels[(texY << tex.widthShift) + texX];//tex.pixels[texY * tex.width + texX];
+          
+          // DESEMPAQUETAR los canales usando máscaras de bits
+          uint16_t r = (color >> 11) & 0x1F;
+          uint16_t g = (color >> 5) & 0x3F;
+          uint16_t b = color & 0x1F;
 
-        // Leer el color de la textura mapeada
-        uint16_t color = tex.pixels[texY * tex.width + texX];
-        
-        // DESEMPAQUETAR los canales usando máscaras de bits
-        uint16_t r = (color >> 11) & 0x1F;
-        uint16_t g = (color >> 5) & 0x3F;
-        uint16_t b = color & 0x1F;
+          // APLICAR LUZ usando operaciones enteras rápidas (Shift derecho >> 8 reemplaza la división)
+          r = (r * light_intensity) >> 8;
+          g = (g * light_intensity) >> 8;
+          b = (b * light_intensity) >> 8;
 
-        // APLICAR LUZ usando operaciones enteras rápidas (Shift derecho >> 8 reemplaza la división)
-        r = (r * light_intensity) >> 8;
-        g = (g * light_intensity) >> 8;
-        b = (b * light_intensity) >> 8;
+          // Aplicamos la niebla
+          r = (r * fog + fr * (255 - fog)) >> 8;
+          g = (g * fog + fg * (255 - fog)) >> 8;
+          b = (b * fog + fb * (255 - fog)) >> 8;
 
-        // REEMPAQUETAR en un nuevo uint16_t RGB565
-        uint16_t lit_color = ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);
+          // REEMPAQUETAR en un nuevo uint16_t RGB565
+          uint16_t lit_color = ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);
 
-        // Pintar en el lienzo virtual
-        framebuffer[y * HEIGHT + x] = lit_color;
-        zbuffer[y * HEIGHT + x] = depth;
+          // Pintar en el lienzo virtual
+          framebuffer[y * HEIGHT + x] = lit_color;
+          zbuffer[y * HEIGHT + x] = depth;
+        }
 
         // Avanzar al siguiente píxel de la textura
         u += du;
         v += dv;
+
+        alpha += dAlphaDx;
+        beta  += dBetaDx;
+        gamma += dGammaDx;
+        inv_w += dInvW;
+
+        // Corrección de perspectiva
+        u_over_w  += dUOW;
+        v_over_w  += dVOW;
       }
     }
   }
