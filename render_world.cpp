@@ -472,11 +472,15 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
   float inv_w, z;
   uint16_t depth;
 
-  float denom = (y1 - y2)*(x0 - x2) + (x2 - x1)*(y0 - y2);
+  float denom = (alphaY12)*(x0 - x2) + (alphaX21)*(y0 - y2);
   denom = 1.0f / denom;
 
   float fog_prop = (FOG_END - FOG_START);
   fog_prop = 1.0f / fog_prop;
+
+  float dAlphaDx = (alphaY12) * denom;
+  float dBetaDx  = (betaY20) * denom;
+  float dGammaDx = -dAlphaDx - dBetaDx;
 
   uint16_t fr = (fog_color >> 11) & 0x1F;
   uint16_t fg = (fog_color >> 5)  & 0x3F;
@@ -521,26 +525,14 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
     }
 
     // 4. Dibujar la línea horizontal (Segmento de textura)
-    float dx = xb - xa;
-    if (dx > 0) { // Protección contra división por cero
-      // Convertir a punto fijo para u, v y sus pasos
-      int32_t u = (int32_t)(ua * UV_SCALE);
-      int32_t v = (int32_t)(va * UV_SCALE);
-      int32_t du = (int32_t)((ub - ua) / dx * UV_SCALE);
-      int32_t dv = (int32_t)((vb - va) / dx * UV_SCALE);
+    if (xb > xa) { // Protección contra división por cero
 
       int x_start = (int)xa;
       int x_end = (int)xb;
 
-      if (x_start < 0){
-        int offset = -x_start; // Cuántos píxeles nos pasamos
-        u += du * offset;      // Adelantamos la textura matemáticamente
-        v += dv * offset;
-        x_start = 0;           // Forzamos a empezar en el borde izquierdo de la pantalla
-      }
-      else if (x_end > HEIGHT-1){
-        x_end = HEIGHT-1;
-      }
+      if (x_start < 0) x_start = 0;           // Forzamos a empezar en el borde izquierdo de la pantalla
+      
+      else if (x_end > HEIGHT-1) x_end = HEIGHT-1; 
 
       alpha = (alphaY12*(x_start - x2) + alphaX21*(y - y2)) * denom;
       beta = (betaY20*(x_start - x2) + betaX02*(y - y2)) * denom;
@@ -548,18 +540,17 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
       inv_w = alpha * w[0] + beta * w[1] + gamma * w[2];
       u_over_w  = alpha * u_over_w0  + beta * u_over_w1  + gamma * u_over_w2;
       v_over_w  = alpha * v_over_w0  + beta * v_over_w1  + gamma * v_over_w2;
-      float dAlphaDx = (y1 - y2) * denom;
-      float dBetaDx  = (y2 - y0) * denom;
-      float dGammaDx = -dAlphaDx - dBetaDx;
       float dInvW = dAlphaDx * w[0] + dBetaDx  * w[1] + dGammaDx * w[2];
       float dUOW = dAlphaDx * u_over_w0 + dBetaDx  * u_over_w1 + dGammaDx * u_over_w2;
       float dVOW =dAlphaDx * v_over_w0 + dBetaDx  * v_over_w1 + dGammaDx * v_over_w2;
+
+      int index = y * HEIGHT + x_start;
 
       for (int x = x_start; x <= x_end; x++) {
         // Para saber si dibujar o no el pixel
         depth = (uint16_t)(inv_w * 8191.0f);
         
-        if (depth >= zbuffer[y * HEIGHT + x]){
+        if (depth >= zbuffer[index]){
           z = 1.0f / inv_w;
 
           float fogFactor = ((FOG_END - z) * fog_prop);
@@ -602,17 +593,12 @@ void drawTexturedTriangle(Point2D p1, Point2D p2, Point2D p3, UV uv1, UV uv2, UV
           uint16_t lit_color = ((b & 0x1F) << 8) | ((g & 0x07) << 13) | ((g & 0x38) >> 3) | ((r & 0x1F) << 3);
 
           // Pintar en el lienzo virtual
-          framebuffer[y * HEIGHT + x] = lit_color;
-          zbuffer[y * HEIGHT + x] = depth;
+          framebuffer[index] = lit_color;
+          zbuffer[index] = depth;
         }
 
         // Avanzar al siguiente píxel de la textura
-        u += du;
-        v += dv;
-
-        alpha += dAlphaDx;
-        beta  += dBetaDx;
-        gamma += dGammaDx;
+        index++;
         inv_w += dInvW;
 
         // Corrección de perspectiva

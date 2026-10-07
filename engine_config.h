@@ -18,7 +18,7 @@
 #define NEAR_PLANE        1.0f
 #define FAR_PLANE         750.0f
 #define FOG_COLOR         0x0C63 // Swap the bytes: 0x630C becomes 0x0C63 for correct color rendering.
-#define FOG_START         200.0f
+#define FOG_START         400.0f
 #define FOG_END           750.0f
 
 #endif
